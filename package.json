@@ -1,6 +1,6 @@
 {
     "name": "@beni69/cmd",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "description": "The command handler from my discord bot",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
