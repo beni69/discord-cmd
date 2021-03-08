@@ -1,19 +1,23 @@
 import Discord from "discord.js";
-import { join as pathJoin, dirname as pathDirname } from "path";
+import { dirname as pathDirname, join as pathJoin } from "path";
 import readdirp from "readdirp";
 import yargs from "yargs";
 import Command from "./Command";
+import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import * as reaction from "./reaction";
 
 export default class Handler {
-    client: Discord.Client;
-    prefix: string;
-    commands: Discord.Collection<string, Command>;
+    readonly client: Discord.Client;
+    commands: Commands;
     commandsDir: string;
     listening: boolean;
-    admins: Set<Discord.Snowflake>;
-    testServers: Set<Discord.Snowflake>;
-    triggers: Discord.Collection<string, Discord.EmojiIdentifierResolvable>;
+    opts: {
+        prefix: string;
+        admins: Set<Discord.Snowflake>;
+        testServers: Set<Discord.Snowflake>;
+        triggers: Discord.Collection<string, Discord.EmojiIdentifierResolvable>;
+        helpCommand?: HelpSettings;
+    };
 
     v: boolean; // verbose mode
 
@@ -25,6 +29,7 @@ export default class Handler {
         admins = [],
         testServers = [],
         triggers = [],
+        helpCommand,
     }: {
         client: Discord.Client;
         prefix: string;
@@ -33,18 +38,26 @@ export default class Handler {
         admins?: Array<Discord.Snowflake>;
         testServers?: Array<Discord.Snowflake>;
         triggers?: Array<Array<string>>;
+        helpCommand?: HelpSettings;
     }) {
         this.client = client;
-        this.prefix = prefix;
         this.commandsDir = pathJoin(pathDirname(process.argv[1]), commandsDir);
+        this.commands = new Discord.Collection();
         this.v = verbose;
-        this.admins = new Set(admins);
-        this.testServers = new Set(testServers);
-        this.triggers = new Discord.Collection();
-        triggers.forEach(item => this.triggers.set(item[0], item[1]));
+
+        this.opts = {
+            prefix,
+            admins: new Set(admins),
+            testServers: new Set(testServers),
+            triggers: new Discord.Collection(),
+            helpCommand,
+        };
+        // create collection from triggers
+        triggers.forEach(item => this.opts.triggers.set(item[0], item[1]));
+
+        if (helpCommand) HelpInit(this);
 
         this.listening = false;
-        this.commands = new Discord.Collection();
 
         if (this.v) console.log("Command handler launching in verbose mode");
 
@@ -67,6 +80,10 @@ export default class Handler {
             // import the actual file
             const command: Command = (await import(entry.fullPath)).command;
 
+            if (!command.opts.category)
+                command.opts.category =
+                    entry.path.split(/\\|\//g).shift() || "No category";
+
             // error checking
             if (command === undefined)
                 throw new Error(
@@ -76,7 +93,7 @@ export default class Handler {
                 throw new Error(
                     `Command name ${command.opts.names[0]} is being used twice!`
                 );
-            if (command.opts.adminOnly && this.admins.size == 0)
+            if (command.opts.adminOnly && this.opts.admins.size == 0)
                 throw new Error(
                     `Command ${entry.path} is set to admin only, but no admins were defined.`
                 );
@@ -90,30 +107,37 @@ export default class Handler {
         // if (this.v)
         console.log(`Finished loading ${i} commands.`);
 
+        if (this.v)
+            console.log(
+                "Commands:",
+                this.commands.map(item => item.opts.names[0])
+            );
+
         // start listening to messages
         this.listen();
     }
 
     private listen() {
+        // listen only once
         if (this.listening) return;
         this.listening = true;
 
         this.client.on("message", message => {
             //* reaction triggers
-            for (const item of this.triggers.keyArray()) {
+            for (const item of this.opts.triggers.keyArray()) {
                 if (message.content.toLowerCase().includes(item)) {
-                    const emoji = this.triggers.get(
+                    const emoji = this.opts.triggers.get(
                         item
                     ) as Discord.EmojiIdentifierResolvable;
                     reaction.React(message, emoji);
                 }
             }
 
-            //* executing actual command
-            if (!message.content.startsWith(this.prefix)) return;
+            //* prep to execute actual command
+            if (!message.content.startsWith(this.opts.prefix)) return;
 
             const args = message.content
-                .slice(this.prefix.length)
+                .slice(this.opts.prefix.length)
                 .trim()
                 .split(/\s+/);
 
@@ -122,26 +146,32 @@ export default class Handler {
 
             const command = this.getCommand(commandName);
 
-            /* i dont do annoying discord error messages whenever someone
+            /* i dont like annoying discord error messages whenever someone
             says something that starts with the prefix,
             but isnt actually a command and the bot says some bs */
             if (!command) return;
 
-            if (command.opts.adminOnly && !this.admins.has(message.author.id))
+            if (
+                command.opts.adminOnly &&
+                !this.opts.admins.has(message.author.id)
+            )
                 return message.channel.send("You can't run this command!");
 
-            if (command.opts.test && !this.testServers.has(message.guild!.id))
+            if (
+                command.opts.test &&
+                !this.opts.testServers.has(message.guild!.id)
+            )
                 return console.log(
                     `${message.author.tag} tried to use test command: ${command.opts.names[0]}`
                 );
 
-            // running the actual command
+            //* running the actual command
             command.run({
                 client: this.client,
                 message,
                 args,
                 argv: yargs(args).argv,
-                prefix: this.prefix,
+                prefix: this.opts.prefix,
                 handler: this,
             });
         });
@@ -163,3 +193,5 @@ export default class Handler {
         return found;
     }
 }
+
+export type Commands = Discord.Collection<string, Command>;
