@@ -2,4 +2,4 @@
 
 ### The command handler from my discord bot
 
-![npm bundle size (scoped)](https://img.shields.io/bundlephobia/min/@beni69/cmd)
+[![latest version](https://badgen.net/npm/v/@beni69/cmd?color=blue)](https://krsz.me/yWpiK)
