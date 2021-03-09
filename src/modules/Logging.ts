@@ -1,6 +1,4 @@
 import Discord from "discord.js";
-import Handler from "./Command";
-import Command from "./Command";
 
 export class Logger {
     readonly client: Discord.Client;
@@ -26,7 +24,6 @@ export class Logger {
     log(message: Discord.Message) {
         const str = this.getFormat(message);
 
-        // TODO: send msg to every channel
         this.channels.forEach(ch => ch.send(str));
     }
 
