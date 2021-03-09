@@ -21,14 +21,14 @@ export class Logger {
         else this.format = format;
     }
 
-    log(message: Discord.Message) {
-        const str = this.getFormat(message);
+    log(message?: Discord.Message, format = this.format) {
+        const str = message ? this.getFormat(message, format) : format;
 
         this.channels.forEach(ch => ch.send(str));
     }
 
-    getFormat(message: Discord.Message) {
-        return this.format
+    getFormat(message: Discord.Message, format: LoggerFormatTypes | string) {
+        return format
             .replace("$authorName$", message.author.tag)
             .replace("$authorTag$", message.author.toString())
             .replace("$content$", message.content)

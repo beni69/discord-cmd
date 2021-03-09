@@ -126,7 +126,11 @@ export default class Handler {
             }
 
             //* prep to execute actual command
-            if (!message.content.startsWith(this.opts.prefix)) return;
+            if (
+                !message.content.startsWith(this.opts.prefix) ||
+                message.author.id == this.client.user?.id
+            )
+                return;
 
             const args = message.content
                 .slice(this.opts.prefix.length)
