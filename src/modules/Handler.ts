@@ -5,19 +5,15 @@ import yargs from "yargs";
 import Command from "./Command";
 import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import * as reaction from "./reaction";
+import * as logging from "./Logging";
 
 export default class Handler {
     readonly client: Discord.Client;
     commands: Commands;
     commandsDir: string;
     listening: boolean;
-    opts: {
-        prefix: string;
-        admins: Set<Discord.Snowflake>;
-        testServers: Set<Discord.Snowflake>;
-        triggers: Discord.Collection<string, Discord.EmojiIdentifierResolvable>;
-        helpCommand?: HelpSettings;
-    };
+    opts: HandlerOpions;
+    readonly logger?: logging.Logger;
 
     v: boolean; // verbose mode
 
@@ -30,16 +26,8 @@ export default class Handler {
         testServers = [],
         triggers = [],
         helpCommand,
-    }: {
-        client: Discord.Client;
-        prefix: string;
-        commandsDir: string;
-        verbose?: boolean;
-        admins?: Array<Discord.Snowflake>;
-        testServers?: Array<Discord.Snowflake>;
-        triggers?: Array<Array<string>>;
-        helpCommand?: HelpSettings;
-    }) {
+        logging: loggerOptions,
+    }: HandlerConstructor) {
         this.client = client;
         this.commandsDir = pathJoin(pathDirname(process.argv[1]), commandsDir);
         this.commands = new Discord.Collection();
@@ -52,10 +40,14 @@ export default class Handler {
             triggers: new Discord.Collection(),
             helpCommand,
         };
-        // create collection from triggers
+        //* setting up built-in modules
+        // triggers
         triggers.forEach(item => this.opts.triggers.set(item[0], item[1]));
-
+        // help command
         if (helpCommand) HelpInit(this);
+        // logging
+        if (loggerOptions)
+            this.logger = new logging.Logger(client, loggerOptions);
 
         this.listening = false;
 
@@ -174,6 +166,9 @@ export default class Handler {
                 prefix: this.opts.prefix,
                 handler: this,
             });
+
+            //* log the command
+            if (this.logger) this.logger.log(message);
         });
     }
 
@@ -195,3 +190,21 @@ export default class Handler {
 }
 
 export type Commands = Discord.Collection<string, Command>;
+export interface HandlerOpions {
+    prefix: string;
+    admins: Set<Discord.Snowflake>;
+    testServers: Set<Discord.Snowflake>;
+    triggers: Discord.Collection<string, Discord.EmojiIdentifierResolvable>;
+    helpCommand?: HelpSettings;
+}
+export interface HandlerConstructor {
+    readonly client: Discord.Client;
+    prefix: string;
+    commandsDir: string;
+    verbose?: boolean;
+    admins?: Array<Discord.Snowflake>;
+    testServers?: Array<Discord.Snowflake>;
+    triggers?: Array<Array<string>>;
+    helpCommand?: HelpSettings;
+    logging?: logging.LoggerOptions;
+}
