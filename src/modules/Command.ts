@@ -22,6 +22,7 @@ export interface CommandOptions {
     category?: string;
     adminOnly?: boolean;
     test?: boolean;
+    react?: Discord.EmojiIdentifierResolvable;
 }
 export interface CommandParams {
     client: Discord.Client;
@@ -30,6 +31,7 @@ export interface CommandParams {
     argv: yargs.Arguments;
     prefix: string;
     handler: Handler;
+    text: string;
 }
 
 export type CommandCallback = (params: CommandParams) => void;

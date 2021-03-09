@@ -114,7 +114,7 @@ export default class Handler {
         if (this.listening) return;
         this.listening = true;
 
-        this.client.on("message", message => {
+        this.client.on("message", async message => {
             //* reaction triggers
             for (const item of this.opts.triggers.keyArray()) {
                 if (message.content.toLowerCase().includes(item)) {
@@ -139,8 +139,9 @@ export default class Handler {
 
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
-
             const command = this.getCommand(commandName);
+            // also sets "text" wich is all the args as a string
+            const text = args.join(" ");
 
             /* i dont like annoying discord error messages whenever someone
             says something that starts with the prefix,
@@ -162,14 +163,16 @@ export default class Handler {
                 );
 
             //* running the actual command
-            command.run({
+            await command.run({
                 client: this.client,
                 message,
                 args,
                 argv: yargs(args).argv,
                 prefix: this.opts.prefix,
                 handler: this,
+                text,
             });
+            if (command.opts.react) reaction.React(message, command.opts.react);
 
             //* log the command
             if (this.logger) this.logger.log(message);
