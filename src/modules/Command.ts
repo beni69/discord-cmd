@@ -1,6 +1,7 @@
 import Discord from "discord.js";
 import yargs from "yargs";
 import Handler from "./Handler";
+import { Logger } from "./Logging";
 
 export default class Command {
     opts: CommandOptions & { names: string[] };
@@ -32,6 +33,7 @@ export interface CommandParams {
     prefix: string;
     handler: Handler;
     text: string;
+    logger?: Logger;
 }
 
 export type CommandCallback = (params: CommandParams) => void;

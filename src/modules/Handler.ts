@@ -13,7 +13,7 @@ export default class Handler {
     commandsDir: string;
     listening: boolean;
     opts: HandlerOpions;
-    readonly logger?: logging.Logger;
+    logger?: logging.Logger;
 
     v: boolean; // verbose mode
 
@@ -171,6 +171,7 @@ export default class Handler {
                 prefix: this.opts.prefix,
                 handler: this,
                 text,
+                logger: this.logger,
             });
             if (command.opts.react) reaction.React(message, command.opts.react);
 
