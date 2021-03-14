@@ -10,54 +10,74 @@ export interface HelpSettings {
 }
 
 export function init(handler: Handler) {
-    const settings = handler.opts.helpCommand!;
+    const settings = handler.getOpts.helpCommand!;
 
     const command = new Command(
         { names: settings.names },
-        ({ message, client, handler, argv }) => {
+        ({ message, client, handler, text, argv }) => {
             const embed = new MessageEmbed()
                 .setColor(settings?.color || "RANDOM")
-                .setTitle(settings?.title || client.user?.username)
                 .setTimestamp()
                 .setFooter(
                     message.author.tag,
                     message.author.displayAvatarURL({ dynamic: true })
                 );
 
-            const commands = handler.commands;
-            const categories = new Map<string, Array<Command>>();
+            //*  default help command
+            if (!text) {
+                embed.setTitle(settings?.title || client.user?.username);
+                const commands = handler.getCommands;
+                const categories = new Map<string, Array<Command>>();
 
-            commands
-                // ignore the help command and test commands
-                .filter(
-                    item =>
-                        item.opts.names !== command.opts.names &&
-                        !(
-                            item.opts.test === true ||
-                            handler.opts.testServers.has(message.guild!.id)
-                        )
-                )
-                .forEach(item => {
-                    const c =
-                        categories.get(item.opts.category as string) || [];
-                    c?.push(item);
-                    categories.set(
-                        item.opts.category as string,
-                        c as Command[]
+                // ignore the help command and test commands in non-test servers
+                commands
+                    .filter(
+                        item =>
+                            item.opts.names !== command.opts.names &&
+                            (!item.opts.test ||
+                                handler.getOpts.testServers.has(
+                                    message.guild!.id
+                                ))
+                    )
+                    .forEach(item => {
+                        const c =
+                            categories.get(item.opts.category as string) || [];
+                        c?.push(item);
+                        categories.set(
+                            item.opts.category as string,
+                            c as Command[]
+                        );
+                    });
+
+                categories.forEach(c => {
+                    const field = c.map(item =>
+                        [
+                            `**${capitalise(item.opts.names[0])}**`,
+                            item.opts.description,
+                        ]
+                            .join("\n")
+                            .trim()
+                    );
+                    embed.addField(
+                        `*${capitalise(c[0].opts.category as string)}*`,
+                        field,
+                        true
                     );
                 });
+            }
+            //*
+            else {
+                const command = handler.getCommand(text);
+                if (!command) return;
 
-            categories.forEach(c => {
-                const field = c.map(item =>
-                    [`**${item.opts.names[0]}**`, item.opts.description].join(
-                        "\n"
+                embed
+                    .setTitle(command.opts.names[0])
+                    .setDescription(
+                        command.opts.description ||
+                            "This command doesn't have a description."
                     )
-                );
-                embed.addField(
-                    `*${capitalise(c[0].opts.category as string)}*`,
-                    field
-                );
-            });
+                    .addField("Category", command.opts.category, true);
+            }
 
             message.channel.send({ embed });
 
@@ -69,4 +89,3 @@ export function init(handler: Handler) {
 
     handler.commands.set(command.opts.names[0], command);
 }
-declare const emb: MessageEmbed;
