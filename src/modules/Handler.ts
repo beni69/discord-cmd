@@ -98,6 +98,10 @@ export class Handler extends EventEmitter {
         return this.commands;
     }
 
+    public get getLogger(): logging.Logger | undefined {
+        return this.logger;
+    }
+
     async loadCommands(dir: string, reload: boolean = false) {
         if (reload) this.commands.clear();
 
