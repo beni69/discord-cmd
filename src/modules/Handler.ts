@@ -6,9 +6,10 @@ import readdirp from "readdirp";
 import yargs from "yargs";
 import Command from "./Command";
 import { HelpSettings, init as HelpInit } from "./HelpCommand";
-import * as logging from "./Logging";
+import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
-import * as reaction from "./Reaction";
+import { React } from "./Reaction";
+import { toTime } from "./Utils";
 
 export declare interface Handler {
     on<U extends keyof HandlerEvents>(
@@ -29,7 +30,7 @@ export class Handler extends EventEmitter {
     private listening: boolean = false;
     readonly v: boolean; // verbose mode
     private paused: boolean = false;
-    private logger?: logging.Logger;
+    private logger?: Logger;
     private cache: HandlerCache;
 
     constructor({
@@ -45,6 +46,7 @@ export class Handler extends EventEmitter {
         mongodb,
         blacklist,
         pauseCommand,
+        ignoreBots = false,
     }: HandlerConstructor) {
         super();
 
@@ -62,6 +64,7 @@ export class Handler extends EventEmitter {
             helpCommand,
             blacklist: blacklist || [],
             pauseCommand,
+            ignoreBots,
         };
         //* setting up built-in modules
         // triggers
@@ -69,8 +72,7 @@ export class Handler extends EventEmitter {
         // help command
         if (helpCommand) HelpInit(this);
         // logging
-        if (loggerOptions)
-            this.logger = new logging.Logger(client, loggerOptions);
+        if (loggerOptions) this.logger = new Logger(client, loggerOptions);
 
         // this.listening = false;
         // this.paused = false;
@@ -98,7 +100,7 @@ export class Handler extends EventEmitter {
         return this.commands;
     }
 
-    public get getLogger(): logging.Logger | undefined {
+    public get getLogger(): Logger | undefined {
         return this.logger;
     }
 
@@ -163,8 +165,10 @@ export class Handler extends EventEmitter {
 
         this.client.on("message", async message => {
             if (
-                this.paused &&
-                message.content != this.opts.prefix + this.opts.pauseCommand
+                (this.paused &&
+                    message.content !=
+                        this.opts.prefix + this.opts.pauseCommand) ||
+                message.author.id === this.client.user?.id
             )
                 return;
 
@@ -191,16 +195,12 @@ export class Handler extends EventEmitter {
                     const emoji = this.opts.triggers.get(
                         item
                     ) as Discord.EmojiIdentifierResolvable;
-                    reaction.React(message, emoji);
+                    React(message, emoji);
                 }
             }
 
             //* prep to execute actual command
-            if (
-                !message.content.startsWith(this.opts.prefix) ||
-                message.author.id == this.client.user?.id
-            )
-                return;
+            if (!message.content.startsWith(this.opts.prefix)) return;
 
             const args = message.content
                 .slice(this.opts.prefix.length)
@@ -262,7 +262,7 @@ export class Handler extends EventEmitter {
                     this.opts.errMsg?.tooFewArgs ||
                         `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
                 );
-            // cooldowns
+            // command is on cooldown
             if (
                 message.channel.type != "dm" &&
                 (command.opts.cooldown as number) > 0
@@ -273,20 +273,52 @@ export class Handler extends EventEmitter {
                         cd.user == message.author.id &&
                         cd.command == command.opts.names[0]
                 );
-                if (CD && CD!.expires > Date.now())
+                if (CD && CD!.expires > Date.now()) {
+                    const t = toTime(Date.now() - CD.expires);
+                    let str = t.y
+                        ? t.y + "years "
+                        : "" + t.m
+                        ? t.m + "months "
+                        : "" + t.d
+                        ? t.d + "days "
+                        : "" + t.h
+                        ? t.h + "hours "
+                        : "" + t.min
+                        ? t.min + "minutes "
+                        : "" + t.s
+                        ? t.s + "seconds"
+                        : "";
+
                     return message.channel.send(
                         this.opts.errMsg?.cooldown ||
-                            `This command is on cooldown for another ${1} seconds.`
+                            `This command is on cooldown for another ${str}.`
                     );
+                }
 
                 const globalCD = guild?.globalCooldowns.find(
                     cd => cd.command == command.opts.names[0]
                 );
-                if (globalCD && globalCD!.expires > Date.now())
+                if (globalCD && globalCD!.expires > Date.now()) {
+                    const t = toTime(Date.now() - globalCD.expires);
+                    let str = t.y
+                        ? t.y + "years "
+                        : "" + t.m
+                        ? t.m + "months "
+                        : "" + t.d
+                        ? t.d + "days "
+                        : "" + t.h
+                        ? t.h + "hours "
+                        : "" + t.min
+                        ? t.min + "minutes "
+                        : "" + t.s
+                        ? t.s + "seconds"
+                        : "";
+
                     return message.channel.send(
                         this.opts.errMsg?.globalCooldown ||
-                            `This command is on cooldown for the entire server for another ${1} seconds.`
+                            `This command is on cooldown for the entire server for another ${str}.`
                     );
+                }
             }
 
             //* running the actual command
@@ -300,7 +332,7 @@ export class Handler extends EventEmitter {
                 text,
                 logger: this.logger,
             });
-            if (command.opts.react) reaction.React(message, command.opts.react);
+            if (command.opts.react) React(message, command.opts.react);
 
             //* log the command
             if (this.logger) this.logger.log(message);
@@ -439,6 +471,7 @@ export type HandlerOpions = {
     helpCommand?: HelpSettings;
     blacklist: Array<Discord.Snowflake>;
     pauseCommand?: string;
+    ignoreBots?: boolean;
     errMsg?: {
         tooFewArgs?: string;
         tooManyArgs?: string;
@@ -458,10 +491,11 @@ export type HandlerConstructor = {
     testServers?: Array<Discord.Snowflake>;
     triggers?: Array<Array<string>>;
     helpCommand?: HelpSettings;
-    logging?: logging.LoggerOptions;
+    logging?: LoggerOptions;
     mongodb?: string;
     blacklist?: Array<Discord.Snowflake>;
     pauseCommand?: string;
+    ignoreBots?: boolean;
 };
 export type HandlerEvents = {
     dbConnected: () => void;

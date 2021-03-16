@@ -18,11 +18,6 @@ export class Logger {
             );
 
         this.format = format;
-
-        process.on("unhandledRejection", error => {
-            console.error("Unhandled promise rejection:", error);
-            this.send(`Unhandled promise rejection:\n**${error}**`);
-        });
     }
 
     log(message: Discord.Message, format: LoggerFormat = this.format) {
@@ -54,6 +49,7 @@ export class Logger {
             .replace("$timestamp$", message.createdAt.toLocaleString());
     }
 }
+export default Logger;
 
 export interface LoggerOptions {
     channel: Discord.Snowflake | Array<Discord.Snowflake>;

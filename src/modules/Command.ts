@@ -2,6 +2,7 @@ import Discord from "discord.js";
 import { Arguments } from "yargs";
 import Handler from "./Handler";
 import { Logger } from "./Logging";
+import { toMillisec } from "./Utils";
 
 export default class Command {
     opts: CommandOptions & { names: string[] };
@@ -14,25 +15,23 @@ export default class Command {
         // if name is "name" convert it to "[name]"
         if (typeof opts.names === "string") this.opts.names = [opts.names];
 
-        // convert cooldowns
-        const toMillisec = (str: string) => {
-            if (str.endsWith("ms") || /^\d+$/.test(str)) return parseInt(str);
-            else if (str.endsWith("s")) return parseInt(str) * 1000;
-            else if (str.endsWith("m")) return parseInt(str) * 60000;
-            else if (str.endsWith("h")) return parseInt(str) * 3600000;
-            else if (str.endsWith("d")) return parseInt(str) * 86400000;
-            else
+        if (opts.cooldown) {
+            const cd = toMillisec(opts.cooldown.toString());
+            if (!cd)
                 throw new Error(
                     `Cooldown for command ${this.opts.names[0]} is not in a valid format.`
                 );
-        };
+            this.opts.cooldown = cd;
+        }
 
-        if (opts.cooldown)
-            this.opts.cooldown = toMillisec(opts.cooldown.toString());
-        if (opts.globalCooldown)
-            this.opts.globalCooldown = toMillisec(
-                opts.globalCooldown.toString()
-            );
+        if (opts.globalCooldown) {
+            const cd = toMillisec(opts.globalCooldown.toString());
+            if (!cd)
+                throw new Error(
+                    `Global cooldown for command ${this.opts.names[0]} is not in a valid format.`
+                );
+            this.opts.globalCooldown = cd;
+        }
     }
 }
 
