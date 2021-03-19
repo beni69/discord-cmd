@@ -1,4 +1,4 @@
-import { model, Schema } from "mongoose";
+import { model, Schema, Document } from "mongoose";
 
 export const guild = model(
     "guild",
@@ -8,8 +8,7 @@ export const guild = model(
         globalCooldowns: { type: Array, default: [] },
     })
 );
-export type guild = {
-    _id: string;
+export type guild = Document & {
     cooldowns: Array<{ user: string; command: string; expires: number }>;
     globalCooldowns: Array<{ command: string; expires: number }>;
 };

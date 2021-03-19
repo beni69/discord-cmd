@@ -9,7 +9,7 @@ import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
 import { React } from "./Reaction";
-import { toTime } from "./Utils";
+import { toTime, cleanDB } from "./Utils";
 
 export declare interface Handler {
     on<U extends keyof HandlerEvents>(
@@ -31,7 +31,6 @@ export class Handler extends EventEmitter {
     readonly v: boolean; // verbose mode
     private paused: boolean = false;
     private logger?: Logger;
-    private cache: HandlerCache;
 
     constructor({
         client,
@@ -50,10 +49,14 @@ export class Handler extends EventEmitter {
     }: HandlerConstructor) {
         super();
 
+        if (client.readyAt === null)
+            throw new Error(
+                "The client must be ready when you create the handler."
+            );
+
         this.client = client;
         this.commandsDir = pathJoin(pathDirname(process.argv[1]), commandsDir);
         this.commands = new Discord.Collection();
-        this.cache = new Discord.Collection();
         this.v = verbose;
 
         this.opts = {
@@ -74,8 +77,8 @@ export class Handler extends EventEmitter {
         // logging
         if (loggerOptions) this.logger = new Logger(client, loggerOptions);
 
-        // this.listening = false;
-        // this.paused = false;
+        this.listening = false;
+        this.paused = false;
 
         if (this.v) console.log("Command handler launching in verbose mode");
 
@@ -84,7 +87,6 @@ export class Handler extends EventEmitter {
 
         // connect to db and set up sync
         if (mongodb) this.dbConnect(mongodb);
-        client.setInterval(() => this.sync(), 60 * 1000 * 5);
     }
 
     public get isPaused(): boolean {
@@ -99,7 +101,6 @@ export class Handler extends EventEmitter {
     public get getCommands(): Commands {
         return this.commands;
     }
-
     public get getLogger(): Logger | undefined {
         return this.logger;
     }
@@ -111,8 +112,6 @@ export class Handler extends EventEmitter {
         for await (const entry of readdirp(dir, {
             fileFilter: ["*.js", "*.ts"],
         })) {
-            delete entry.dirent; // dont need
-
             if (this.v) console.log(`Loading command: ${entry.basename}`);
 
             // import the actual file
@@ -156,6 +155,7 @@ export class Handler extends EventEmitter {
 
         // start listening to messages
         this.listen();
+        this.emit("ready");
     }
 
     private listen() {
@@ -172,23 +172,16 @@ export class Handler extends EventEmitter {
             )
                 return;
 
-            //* add server to cache
-            if (
-                message.channel.type != "dm" &&
-                !this.cache.has(message.guild!.id)
-            ) {
-                const m = new models.guild({
+            //* saving guild to db
+            if (!(await models.guild.findById(message.guild!.id))) {
+                const g = new models.guild({
                     _id: message.guild!.id,
                     cooldowns: [],
                     globalCooldowns: [],
                 });
-                this.cache.set(
-                    message.guild!.id,
-                    // @ts-ignore
-                    m
-                );
-                m.save();
+                await g.save();
             }
+
             //* reaction triggers
             for (const item of this.opts.triggers.keyArray()) {
                 if (message.content.toLowerCase().includes(item)) {
@@ -267,57 +260,37 @@ export class Handler extends EventEmitter {
                 message.channel.type != "dm" &&
                 (command.opts.cooldown as number) > 0
             ) {
-                const guild = this.cache.get(message.guild!.id);
-                const CD = guild?.cooldowns.find(
-                    cd =>
-                        cd.user == message.author.id &&
-                        cd.command == command.opts.names[0]
-                );
-                if (CD && CD!.expires > Date.now()) {
-                    const t = toTime(Date.now() - CD.expires);
-                    let str = t.y
-                        ? t.y + "years "
-                        : "" + t.m
-                        ? t.m + "months "
-                        : "" + t.d
-                        ? t.d + "days "
-                        : "" + t.h
-                        ? t.h + "hours "
-                        : "" + t.min
-                        ? t.min + "minutes "
-                        : "" + t.s
-                        ? t.s + "seconds"
-                        : "";
+                // const guild = this.cache.get(message.guild!.id);
+                const guild: models.guild | null = (await models.guild.findById(
+                    message.guild!.id
+                )) as models.guild;
 
-                    return message.channel.send(
-                        this.opts.errMsg?.cooldown ||
-                            `This command is on cooldown for another ${str}.`
+                if (guild) {
+                    const CD = guild?.cooldowns.find(
+                        cd =>
+                            cd.user == message.author.id &&
+                            cd.command == command.opts.names[0]
                     );
-                }
+                    if (CD && CD!.expires > Date.now()) {
+                        const t = toTime(Date.now() - CD.expires, true);
 
-                const globalCD = guild?.globalCooldowns.find(
-                    cd => cd.command == command.opts.names[0]
-                );
-                if (globalCD && globalCD!.expires > Date.now()) {
-                    const t = toTime(Date.now() - globalCD.expires);
-                    let str = t.y
-                        ? t.y + "years "
-                        : "" + t.m
-                        ? t.m + "months "
-                        : "" + t.d
-                        ? t.d + "days "
-                        : "" + t.h
-                        ? t.h + "hours "
-                        : "" + t.min
-                        ? t.min + "minutes "
-                        : "" + t.s
-                        ? t.s + "seconds"
-                        : "";
+                        return message.channel.send(
+                            this.opts.errMsg?.cooldown ||
+                                `This command is on cooldown for another ${t}.`
+                        );
+                    }
 
-                    return message.channel.send(
-                        this.opts.errMsg?.globalCooldown ||
-                            `This command is on cooldown for the entire server for another ${str}.`
+                    const globalCD = guild?.globalCooldowns.find(
+                        cd => cd.command == command.opts.names[0]
                     );
+                    if (globalCD && globalCD!.expires > Date.now()) {
+                        const t = toTime(Date.now() - globalCD.expires, true);
+
+                        return message.channel.send(
+                            this.opts.errMsg?.globalCooldown ||
+                                `This command is on cooldown for the entire server for another ${t}.`
+                        );
+                    }
                 }
             }
 
@@ -332,22 +305,34 @@ export class Handler extends EventEmitter {
                 text,
                 logger: this.logger,
             });
+
             if (command.opts.react) React(message, command.opts.react);
 
             //* log the command
             if (this.logger) this.logger.log(message);
 
             //* apply the cooldown (not if command falied)
-            if (res !== false) {
-                const guild = this.cache.get(message.guild!.id);
+            if (
+                res !== false &&
+                (command.opts.cooldown || command.opts.globalCooldown)
+            ) {
+                const guild: models.guild | null = (await models.guild.findById(
+                    message.guild!.id
+                )) as models.guild;
+
                 if (command.opts.cooldown) {
+                    // adding the cooldown
                     guild?.cooldowns.push({
                         user: message.author.id,
                         command: command.opts.names[0],
                         expires: Date.now() + (command.opts.cooldown as number),
                     });
-                    this.client.setTimeout(() => {
-                        const g = this.cache.get(message.guild!.id)!;
+                    // removing the cooldown after it expired
+                    this.client.setTimeout(async () => {
+                        const g: models.guild | null = (await models.guild.findById(
+                            message.guild!.id
+                        )) as models.guild;
+
                         const i = g?.cooldowns.findIndex(
                             cd =>
                                 cd.user == message.author.id &&
@@ -355,7 +340,8 @@ export class Handler extends EventEmitter {
                         );
                         if (i === -1) return;
                         g?.cooldowns.splice(i, 1);
-                        this.cache.set(message.guild!.id, g);
+
+                        await g.updateOne({ cooldowns: g.cooldowns });
                     }, command.opts.cooldown as number);
                 }
                 if (command.opts.globalCooldown) {
@@ -365,19 +351,27 @@ export class Handler extends EventEmitter {
                             Date.now() +
                             (command.opts.globalCooldown as number),
                     });
-                    this.client.setTimeout(() => {
-                        const g = this.cache.get(message.guild!.id)!;
+                    this.client.setTimeout(async () => {
+                        const g: models.guild | null = (await models.guild.findById(
+                            message.guild!.id
+                        )) as models.guild;
+
                         const i = g?.globalCooldowns.findIndex(
                             cd => cd.command == command.opts.names[0]
                         );
                         if (i === -1) return;
                         g?.globalCooldowns.splice(i, 1);
-                        this.cache.set(message.guild!.id, g);
+
+                        await g.updateOne({
+                            globalCooldowns: g.globalCooldowns,
+                        });
                     }, command.opts.globalCooldown as number);
                 }
 
-                this.cache.set(message.guild!.id, guild!);
-                this.sync();
+                await guild.updateOne({
+                    cooldowns: guild.cooldowns,
+                    globalCooldowns: guild.globalCooldowns,
+                });
             }
         });
     }
@@ -403,13 +397,13 @@ export class Handler extends EventEmitter {
             await mongoose.connect(uri, {
                 useNewUrlParser: true,
                 useUnifiedTopology: true,
-                useFindAndModify: false,
+                // useFindAndModify: false,
                 useCreateIndex: true,
             });
 
             console.log("Handler connected to DB");
             this.emit("dbConnected");
-            this.sync();
+            await cleanDB();
         } catch (err) {
             console.error(
                 "Handler failed to connect to MongoDB: ",
@@ -417,46 +411,6 @@ export class Handler extends EventEmitter {
             );
             this.emit("dbConnectFailed", err);
         }
-    }
-    async sync() {
-        if (!this.cache.size)
-            await models.guild.find((err, found) => {
-                if (err) console.error(err);
-                // cache all the data
-                found.forEach(x =>
-                    this.cache.set(x._id, (x as unknown) as models.guild)
-                );
-
-                // delete all the expired cooldowns
-                this.cache.forEach(g => {
-                    // per-user cooldowns
-                    let toDelete: number[] = [];
-                    g.cooldowns.forEach((cd, i) => {
-                        if (cd.expires < Date.now()) toDelete.push(i);
-                    });
-                    toDelete.forEach(n => g.cooldowns.splice(n, 1));
-
-                    // global cooldowns
-                    toDelete = [];
-                    g.globalCooldowns.forEach((cd, i) => {
-                        if (cd.expires < Date.now()) toDelete.push(i);
-                    });
-                    toDelete.forEach(n => g.globalCooldowns.splice(n, 1));
-
-                    this.cache.set(g._id, g);
-                });
-            });
-
-        // upload the new data
-        this.cache.forEach(async g => {
-            // @ts-ignore
-            await g.updateOne();
-            if (this.v)
-                console.log(
-                    `Saved guild ${this.client.guilds.cache.get(g._id)?.name}`
-                );
-        });
-        this.emit("dbSynced");
     }
 }
 
@@ -498,6 +452,7 @@ export type HandlerConstructor = {
     ignoreBots?: boolean;
 };
 export type HandlerEvents = {
+    ready: () => void;
     dbConnected: () => void;
     dbConnectFailed: (err: unknown) => void;
     dbSynced: () => void;
