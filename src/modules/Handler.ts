@@ -200,11 +200,15 @@ export class Handler extends EventEmitter {
                 .trim()
                 .split(/\s+/);
 
+            // text is just all the args without the command name
+            const text = message.content.replace(
+                this.opts.prefix + args[0],
+                ""
+            );
+
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
             const command = this.getCommand(commandName);
-            // also sets "text" wich is all the args as a string
-            const text = args.join(" ");
 
             // not a command
             if (!command) return;
