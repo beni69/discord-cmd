@@ -116,7 +116,7 @@ export class Handler extends EventEmitter {
 
             // import the actual file
             const command: Command = (await import(entry.fullPath)).command;
-            if (!command) return;
+            if (!command) continue;
 
             if (!command.opts.category) {
                 const r = new RegExp(/\\|\//, "g");
@@ -201,10 +201,9 @@ export class Handler extends EventEmitter {
                 .split(/\s+/);
 
             // text is just all the args without the command name
-            const text = message.content.replace(
-                this.opts.prefix + args[0],
-                ""
-            );
+            const text = message.content
+                .replace(this.opts.prefix + args[0], "")
+                .trim();
 
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
@@ -259,7 +258,7 @@ export class Handler extends EventEmitter {
                     this.opts.errMsg?.tooFewArgs ||
                         `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
                 );
-            // command is on cooldown
+            //* command is on cooldown
             if (
                 message.channel.type != "dm" &&
                 (command.opts.cooldown as number) > 0
@@ -276,7 +275,7 @@ export class Handler extends EventEmitter {
                             cd.command == command.opts.names[0]
                     );
                     if (CD && CD!.expires > Date.now()) {
-                        const t = toTime(Date.now() - CD.expires, true);
+                        const t = toTime(CD.expires - Date.now(), true);
 
                         return message.channel.send(
                             this.opts.errMsg?.cooldown ||
@@ -288,7 +287,7 @@ export class Handler extends EventEmitter {
                         cd => cd.command == command.opts.names[0]
                     );
                     if (globalCD && globalCD!.expires > Date.now()) {
-                        const t = toTime(Date.now() - globalCD.expires, true);
+                        const t = toTime(globalCD.expires - Date.now(), true);
 
                         return message.channel.send(
                             this.opts.errMsg?.globalCooldown ||
@@ -462,3 +461,5 @@ export type HandlerEvents = {
     dbSynced: () => void;
 };
 export type HandlerCache = Discord.Collection<string, models.guild>;
+
+export { Handler as bruh };

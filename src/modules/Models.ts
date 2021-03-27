@@ -1,7 +1,7 @@
 import { model, Schema, Document } from "mongoose";
 
 export const guild = model(
-    "guild",
+    "cooldown",
     new Schema({
         _id: String,
         cooldowns: { type: Array, default: [] },

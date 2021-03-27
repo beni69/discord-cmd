@@ -1,3 +1,4 @@
+import { MessageEmbed, MessageEmbedOptions } from "discord.js";
 import * as models from "./Models";
 
 // convert strings like "5m" and "24h" to milliseconds
@@ -14,11 +15,13 @@ export function toMillisec(str: string) {
 export function toTime(M: number, stringify = false) {
     const date = new Date(M);
     const y = Math.abs(date.getFullYear() - 1970);
-    const m = date.getMonth();
-    const d = date.getDate() - 1;
-    const h = date.getHours() - 1;
+    const m = date.getMonth() - 1;
+    const d = date.getDate();
+    const h = date.getHours();
     const min = date.getMinutes();
     const s = date.getSeconds();
+
+    console.log({ date });
 
     if (stringify) {
         let str = "";
@@ -61,4 +64,8 @@ export async function cleanDB() {
             });
         });
     });
+}
+
+export function newEmbed(title: string, msg: string) {
+    return new MessageEmbed({ title, description: msg }).setTimestamp();
 }
