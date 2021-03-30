@@ -43,7 +43,7 @@ export type CommandOptions = {
     noDM?: boolean;
     test?: boolean;
     react?: Discord.EmojiIdentifierResolvable;
-    backlist?: Array<Discord.Snowflake>;
+    blacklist?: Array<Discord.Snowflake>;
     minArgs?: number;
     maxArgs?: number;
     cooldown?: number | string;

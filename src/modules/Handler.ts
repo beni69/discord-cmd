@@ -9,7 +9,7 @@ import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
 import { React } from "./Reaction";
-import { toTime, cleanDB } from "./Utils";
+import { cleanDB, toTime } from "./Utils";
 
 export declare interface Handler {
     on<U extends keyof HandlerEvents>(
@@ -233,10 +233,12 @@ export class Handler extends EventEmitter {
                     this.opts.errMsg?.noDM ||
                         "You can't use this command in the dms"
                 );
-            // user is on blacklist
+            // user or guild is on blacklist
             if (
                 this.opts.blacklist.includes(message.author.id) ||
-                command.opts.backlist?.includes(message.author.id)
+                command.opts.blacklist?.includes(message.author.id) ||
+                this.opts.blacklist.includes(message.guild!?.id) ||
+                command.opts.blacklist?.includes(message.guild!?.id)
             )
                 return message.channel.send(
                     this.opts.errMsg?.blacklist ||
@@ -461,5 +463,3 @@ export type HandlerEvents = {
     dbSynced: () => void;
 };
 export type HandlerCache = Discord.Collection<string, models.guild>;
-
-export { Handler as bruh };

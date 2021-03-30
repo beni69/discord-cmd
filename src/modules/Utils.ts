@@ -13,29 +13,23 @@ export function toMillisec(str: string) {
 
 // convert milliseconds to strings like "2 hours 5 minutes"
 export function toTime(M: number, stringify = false) {
-    const date = new Date(M);
-    const y = Math.abs(date.getFullYear() - 1970);
-    const m = date.getMonth() - 1;
-    const d = date.getDate();
-    const h = date.getHours();
-    const min = date.getMinutes();
-    const s = date.getSeconds();
+    M /= 1000;
+    const h = Math.floor(M / 3600);
+    const m = Math.floor((M % 3600) / 60);
+    const s = Math.floor((M % 3600) % 60);
 
-    console.log({ date });
+    console.log({ M, h, m, s });
 
     if (stringify) {
         let str = "";
-        str += y ? y + " years " : "";
-        str += m ? m + " months " : "";
-        str += d ? d + " days " : "";
-        str += h ? h + " hours " : "";
-        str += min ? min + " minutes " : "";
-        str += s ? s + " seconds " : "";
+        str += h ? `${h} hours ` : "";
+        str += m ? `${m} minutes ` : "";
+        str += s ? `${s} seconds ` : "";
 
         return str.trim();
     }
 
-    return { y, m, d, h, min, s };
+    return { M, h, m, s };
 }
 
 // remove expired cooldowns from the database
