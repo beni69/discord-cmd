@@ -29,6 +29,7 @@ export class Handler extends EventEmitter {
     private opts: HandlerOpions;
     private listening: boolean = false;
     readonly v: boolean; // verbose mode
+    private db: boolean; // wether we have a db connection
     private paused: boolean = false;
     private logger?: Logger;
 
@@ -79,6 +80,7 @@ export class Handler extends EventEmitter {
 
         this.listening = false;
         this.paused = false;
+        this.db = false;
 
         if (this.v) console.log("Command handler launching in verbose mode");
 
@@ -173,7 +175,7 @@ export class Handler extends EventEmitter {
                 return;
 
             //* saving guild to db
-            if (!(await models.guild.findById(message.guild!.id))) {
+            if (this.db && !(await models.guild.findById(message.guild!.id))) {
                 const g = new models.guild({
                     _id: message.guild!.id,
                     cooldowns: [],
@@ -200,189 +202,200 @@ export class Handler extends EventEmitter {
                 .trim()
                 .split(/\s+/);
 
-            // text is just all the args without the command name
-            const text = message.content
-                .replace(this.opts.prefix + args[0], "")
-                .trim();
-
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
             const command = this.getCommand(commandName);
 
-            // not a command
-            if (!command) return;
-            // command is test servers only
-            if (
-                command.opts.test &&
-                !this.opts.testServers.has(message.guild!.id)
-            )
-                return console.log(
-                    `${message.author.tag} tried to use test command: ${command.opts.names[0]}`
-                );
-            // command is admins only
-            if (
-                command.opts.adminOnly &&
-                !this.opts.admins.has(message.author.id)
-            )
-                return message.channel.send(
-                    this.opts.errMsg?.noAdmin || "You can't run this command!"
-                );
-            // command not allowed in dms
-            if (message.channel.type === "dm" && command.opts.noDM)
-                return message.channel.send(
-                    this.opts.errMsg?.noDM ||
-                        "You can't use this command in the dms"
-                );
-            // user or guild is on blacklist
-            if (
-                this.opts.blacklist.includes(message.author.id) ||
-                command.opts.blacklist?.includes(message.author.id) ||
-                this.opts.blacklist.includes(message.guild!?.id) ||
-                command.opts.blacklist?.includes(message.guild!?.id)
-            )
-                return message.channel.send(
-                    this.opts.errMsg?.blacklist ||
-                        "You've been blacklisted from using this command"
-                );
-            // too many args
-            if (
-                command.opts.maxArgs &&
-                args.length > command.opts.maxArgs &&
-                command.opts.maxArgs > 0
-            )
-                return message.channel.send(
-                    this.opts.errMsg?.tooManyArgs ||
-                        `Too many args. For more info, see: ${this.opts.prefix}help ${commandName}`
-                );
-            // not enough args
-            if (command.opts.minArgs && args.length < command.opts.minArgs)
-                return message.channel.send(
-                    this.opts.errMsg?.tooFewArgs ||
-                        `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
-                );
-            //* command is on cooldown
-            if (
-                message.channel.type != "dm" &&
-                (command.opts.cooldown as number) > 0
-            ) {
-                // const guild = this.cache.get(message.guild!.id);
-                const guild: models.guild | null = (await models.guild.findById(
-                    message.guild!.id
-                )) as models.guild;
+            await this.executeCommand(message, command);
+        });
+    }
 
-                if (guild) {
-                    const CD = guild?.cooldowns.find(
+    public async executeCommand(
+        message: Discord.Message,
+        command: Command | undefined
+    ) {
+        // not a command
+        if (!command) return false;
+
+        const args = message.content
+            .slice(this.opts.prefix.length)
+            .trim()
+            .split(/\s+/);
+
+        // removes first item of args and that is the command name
+        const commandName = args.shift()!.toLowerCase();
+
+        // text is just all the args without the command name
+        const text = message.content
+            .replace(this.opts.prefix + args[0], "")
+            .trim();
+
+        //* error checking
+        // command is test servers only
+        if (command.opts.test && !this.opts.testServers.has(message.guild!.id))
+            return console.log(
+                `${message.author.tag} tried to use test command: ${command.opts.names[0]}`
+            );
+        // command is admins only
+        if (command.opts.adminOnly && !this.opts.admins.has(message.author.id))
+            return message.channel.send(
+                this.opts.errMsg?.noAdmin || "You can't run this command!"
+            );
+        // command not allowed in dms
+        if (message.channel.type === "dm" && command.opts.noDM)
+            return message.channel.send(
+                this.opts.errMsg?.noDM ||
+                    "You can't use this command in the dms"
+            );
+        // user or guild is on blacklist
+        if (
+            this.opts.blacklist.includes(message.author.id) ||
+            command.opts.blacklist?.includes(message.author.id) ||
+            this.opts.blacklist.includes(message.guild!?.id) ||
+            command.opts.blacklist?.includes(message.guild!?.id)
+        )
+            return message.channel.send(
+                this.opts.errMsg?.blacklist ||
+                    "You've been blacklisted from using this command"
+            );
+        // too many args
+        if (
+            command.opts.maxArgs &&
+            args.length > command.opts.maxArgs &&
+            command.opts.maxArgs > 0
+        )
+            return message.channel.send(
+                this.opts.errMsg?.tooManyArgs ||
+                    `Too many args. For more info, see: ${this.opts.prefix}help ${commandName}`
+            );
+        // not enough args
+        if (command.opts.minArgs && args.length < command.opts.minArgs)
+            return message.channel.send(
+                this.opts.errMsg?.tooFewArgs ||
+                    `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
+            );
+        //* command is on cooldown
+        if (
+            message.channel.type != "dm" &&
+            ((command.opts.cooldown as number) > 0 ||
+                (command.opts.globalCooldown as number) > 0)
+        ) {
+            // const guild = this.cache.get(message.guild!.id);
+            const guild: models.guild | null = (await models.guild.findById(
+                message.guild!.id
+            )) as models.guild;
+
+            if (guild) {
+                const CD = guild?.cooldowns.find(
+                    cd =>
+                        cd.user == message.author.id &&
+                        cd.command == command.opts.names[0]
+                );
+                if (CD && CD!.expires > Date.now()) {
+                    const t = toTime(CD.expires - Date.now(), true);
+
+                    return message.channel.send(
+                        this.opts.errMsg?.cooldown ||
+                            `This command is on cooldown for another ${t}.`
+                    );
+                }
+
+                const globalCD = guild?.globalCooldowns.find(
+                    cd => cd.command == command.opts.names[0]
+                );
+                if (globalCD && globalCD!.expires > Date.now()) {
+                    const t = toTime(globalCD.expires - Date.now(), true);
+
+                    return message.channel.send(
+                        this.opts.errMsg?.globalCooldown ||
+                            `This command is on cooldown for the entire server for another ${t}.`
+                    );
+                }
+            }
+        }
+
+        //* running the actual command
+        const res = await command.run({
+            client: this.client,
+            message,
+            args,
+            argv: yargs(args).argv,
+            prefix: this.opts.prefix,
+            handler: this,
+            text,
+            logger: this.logger,
+        });
+
+        if (command.opts.react) React(message, command.opts.react);
+
+        //* log the command
+        if (this.logger) this.logger.log(message);
+
+        //* apply the cooldown (not if command falied)
+        if (
+            res !== false &&
+            (command.opts.cooldown || command.opts.globalCooldown)
+        ) {
+            const guild: models.guild | null = (await models.guild.findById(
+                message.guild!.id
+            )) as models.guild;
+
+            if (command.opts.cooldown) {
+                // adding the cooldown
+                guild?.cooldowns.push({
+                    user: message.author.id,
+                    command: command.opts.names[0],
+                    expires: Date.now() + (command.opts.cooldown as number),
+                });
+                // removing the cooldown after it expired
+                this.client.setTimeout(async () => {
+                    const g: models.guild | null = (await models.guild.findById(
+                        message.guild!.id
+                    )) as models.guild;
+
+                    const i = g?.cooldowns.findIndex(
                         cd =>
                             cd.user == message.author.id &&
                             cd.command == command.opts.names[0]
                     );
-                    if (CD && CD!.expires > Date.now()) {
-                        const t = toTime(CD.expires - Date.now(), true);
+                    if (i === -1) return;
+                    g?.cooldowns.splice(i, 1);
 
-                        return message.channel.send(
-                            this.opts.errMsg?.cooldown ||
-                                `This command is on cooldown for another ${t}.`
-                        );
-                    }
+                    await g.updateOne({ cooldowns: g.cooldowns });
+                }, command.opts.cooldown as number);
+            }
+            if (command.opts.globalCooldown) {
+                guild?.globalCooldowns.push({
+                    command: command.opts.names[0],
+                    expires:
+                        Date.now() + (command.opts.globalCooldown as number),
+                });
+                this.client.setTimeout(async () => {
+                    const g: models.guild | null = (await models.guild.findById(
+                        message.guild!.id
+                    )) as models.guild;
 
-                    const globalCD = guild?.globalCooldowns.find(
+                    const i = g?.globalCooldowns.findIndex(
                         cd => cd.command == command.opts.names[0]
                     );
-                    if (globalCD && globalCD!.expires > Date.now()) {
-                        const t = toTime(globalCD.expires - Date.now(), true);
+                    if (i === -1) return;
+                    g?.globalCooldowns.splice(i, 1);
 
-                        return message.channel.send(
-                            this.opts.errMsg?.globalCooldown ||
-                                `This command is on cooldown for the entire server for another ${t}.`
-                        );
-                    }
-                }
+                    await g.updateOne({
+                        globalCooldowns: g.globalCooldowns,
+                    });
+                }, command.opts.globalCooldown as number);
             }
 
-            //* running the actual command
-            const res = await command.run({
-                client: this.client,
-                message,
-                args,
-                argv: yargs(args).argv,
-                prefix: this.opts.prefix,
-                handler: this,
-                text,
-                logger: this.logger,
+            await guild.updateOne({
+                cooldowns: guild.cooldowns,
+                globalCooldowns: guild.globalCooldowns,
             });
-
-            if (command.opts.react) React(message, command.opts.react);
-
-            //* log the command
-            if (this.logger) this.logger.log(message);
-
-            //* apply the cooldown (not if command falied)
-            if (
-                res !== false &&
-                (command.opts.cooldown || command.opts.globalCooldown)
-            ) {
-                const guild: models.guild | null = (await models.guild.findById(
-                    message.guild!.id
-                )) as models.guild;
-
-                if (command.opts.cooldown) {
-                    // adding the cooldown
-                    guild?.cooldowns.push({
-                        user: message.author.id,
-                        command: command.opts.names[0],
-                        expires: Date.now() + (command.opts.cooldown as number),
-                    });
-                    // removing the cooldown after it expired
-                    this.client.setTimeout(async () => {
-                        const g: models.guild | null = (await models.guild.findById(
-                            message.guild!.id
-                        )) as models.guild;
-
-                        const i = g?.cooldowns.findIndex(
-                            cd =>
-                                cd.user == message.author.id &&
-                                cd.command == command.opts.names[0]
-                        );
-                        if (i === -1) return;
-                        g?.cooldowns.splice(i, 1);
-
-                        await g.updateOne({ cooldowns: g.cooldowns });
-                    }, command.opts.cooldown as number);
-                }
-                if (command.opts.globalCooldown) {
-                    guild?.globalCooldowns.push({
-                        command: command.opts.names[0],
-                        expires:
-                            Date.now() +
-                            (command.opts.globalCooldown as number),
-                    });
-                    this.client.setTimeout(async () => {
-                        const g: models.guild | null = (await models.guild.findById(
-                            message.guild!.id
-                        )) as models.guild;
-
-                        const i = g?.globalCooldowns.findIndex(
-                            cd => cd.command == command.opts.names[0]
-                        );
-                        if (i === -1) return;
-                        g?.globalCooldowns.splice(i, 1);
-
-                        await g.updateOne({
-                            globalCooldowns: g.globalCooldowns,
-                        });
-                    }, command.opts.globalCooldown as number);
-                }
-
-                await guild.updateOne({
-                    cooldowns: guild.cooldowns,
-                    globalCooldowns: guild.globalCooldowns,
-                });
-            }
-        });
+        }
     }
 
     // find a command from any of its names
-    getCommand(name: string | string[]): Command | undefined {
+    public getCommand(name: string | string[]): Command | undefined {
         if (typeof name === "string")
             return (
                 this.commands.get(name) ||
@@ -402,11 +415,12 @@ export class Handler extends EventEmitter {
             await mongoose.connect(uri, {
                 useNewUrlParser: true,
                 useUnifiedTopology: true,
-                // useFindAndModify: false,
+                useFindAndModify: false,
                 useCreateIndex: true,
             });
 
             console.log("Handler connected to DB");
+            this.db = true;
             this.emit("dbConnected");
             await cleanDB();
         } catch (err) {
