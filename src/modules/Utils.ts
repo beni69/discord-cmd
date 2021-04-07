@@ -18,8 +18,6 @@ export function toTime(M: number, stringify = false) {
     const m = Math.floor((M % 3600) / 60);
     const s = Math.floor((M % 3600) % 60);
 
-    console.log({ M, h, m, s });
-
     if (stringify) {
         let str = "";
         str += h ? `${h} hours ` : "";
