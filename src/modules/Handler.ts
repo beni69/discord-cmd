@@ -29,7 +29,7 @@ export class Handler extends EventEmitter {
     private opts: HandlerOpions;
     private listening: boolean = false;
     readonly v: boolean; // verbose mode
-    private db: boolean; // wether we have a db connection
+    private db: boolean; // whether we have a db connection
     private paused: boolean = false;
     private logger?: Logger;
 
@@ -326,7 +326,8 @@ export class Handler extends EventEmitter {
             logger: this.logger,
         });
 
-        if (command.opts.react) React(message, command.opts.react);
+        if (command.opts.react && res !== false)
+            React(message, command.opts.react);
 
         //* log the command
         if (this.logger) this.logger.log(message);
