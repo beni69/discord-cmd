@@ -226,9 +226,7 @@ export class Handler extends EventEmitter {
         const commandName = args.shift()!.toLowerCase();
 
         // text is just all the args without the command name
-        const text = message.content
-            .replace(this.opts.prefix + args[0], "")
-            .trim();
+        const text = args.join(" ");
 
         //* error checking
         // command is test servers only
