@@ -1,8 +1,10 @@
 node_modules/
 .github/
+.git*
 
 # typescript
 src/
+tsconfig.json
 
 # testing
 *test*
