@@ -80,3 +80,6 @@ dist/
 
 # testing
 *test*
+
+#jsdoc
+docs/

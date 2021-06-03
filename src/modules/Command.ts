@@ -4,10 +4,15 @@ import Handler from "./Handler";
 import { Logger } from "./Logging";
 import { toMillisec } from "./Utils";
 
-export default class Command {
+export class Command {
     opts: CommandOptions & { names: string[] };
     run: CommandCallback;
 
+    /**
+     * Create a new command
+     * @param {*} opts - Parameters for the command
+     * @param {*} run - The actual function to run when the command is called
+     */
     constructor(opts: CommandOptions, run: CommandCallback) {
         this.run = run;
         this.opts = opts as CommandOptions & { names: string[] };
@@ -34,6 +39,7 @@ export default class Command {
         }
     }
 }
+export default Command;
 
 export type CommandOptions = {
     names: string[] | string;
@@ -60,4 +66,6 @@ export type CommandParams = {
     logger?: Logger;
 };
 
-export type CommandCallback = (params: CommandParams) => any;
+export type CommandCallback = (
+    params: CommandParams
+) => void | false | Promise<void | false>;

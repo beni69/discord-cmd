@@ -11,7 +11,7 @@ import * as models from "./Models";
 import { React } from "./Reaction";
 import { cleanDB, toTime } from "./Utils";
 
-export declare interface Handler {
+export interface Handler {
     on<U extends keyof HandlerEvents>(
         event: U,
         listener: HandlerEvents[U]
@@ -33,6 +33,10 @@ export class Handler extends EventEmitter {
     private paused: boolean = false;
     private logger?: Logger;
 
+    /**
+     * Create a new command handler
+     * @param {HandlerConstructor} opts - Put all options in this object. Only the client, prefix and commands directory are requred, everthing else is optional.
+     */
     constructor({
         client,
         prefix,
@@ -107,7 +111,13 @@ export class Handler extends EventEmitter {
         return this.logger;
     }
 
-    async loadCommands(dir: string, reload: boolean = false) {
+    /**
+     * Recursively reads a directory and loads all .js and .ts files
+     * (if these files don't export a command they will just be ignored)
+     * @param {string} dir - The directory to use
+     * @param {boolean} reload - Whether to clear the command list before reading (useful to reload the commands)
+     */
+    public async loadCommands(dir: string, reload: boolean = false) {
         if (reload) this.commands.clear();
 
         if (this.v) console.log(`Loading commands from: ${dir}`);
@@ -160,6 +170,9 @@ export class Handler extends EventEmitter {
         this.emit("ready");
     }
 
+    /**
+     * Listen for messages
+     */
     private listen() {
         // listen only once
         if (this.listening) return;
@@ -210,12 +223,19 @@ export class Handler extends EventEmitter {
         });
     }
 
+    /**
+     * Execute a command.
+     * (this is the function used internally for launching the commands)
+     * @param {Discord.Message} message - The message that contains the command
+     * @param {Command} command - The command to execute. (pro tip: combine with handler.getCommand)
+     * @returns void
+     */
     public async executeCommand(
         message: Discord.Message,
         command: Command | undefined
     ) {
         // not a command
-        if (!command) return false;
+        if (!command) return;
 
         const args = message.content
             .slice(this.opts.prefix.length)
@@ -226,52 +246,73 @@ export class Handler extends EventEmitter {
         const commandName = args.shift()!.toLowerCase();
 
         // text is just all the args without the command name
-        const text = args.join(" ");
+        const text = message.content.replace(
+            this.opts.prefix + commandName,
+            ""
+        );
 
         //* error checking
         // command is test servers only
-        if (command.opts.test && !this.opts.testServers.has(message.guild!.id))
-            return console.log(
+        if (
+            command.opts.test &&
+            !this.opts.testServers.has(message.guild!.id)
+        ) {
+            console.log(
                 `${message.author.tag} tried to use test command: ${command.opts.names[0]}`
             );
+            return;
+        }
         // command is admins only
-        if (command.opts.adminOnly && !this.opts.admins.has(message.author.id))
-            return message.channel.send(
+        if (
+            command.opts.adminOnly &&
+            !this.opts.admins.has(message.author.id)
+        ) {
+            message.channel.send(
                 this.opts.errMsg?.noAdmin || "You can't run this command!"
             );
+            return;
+        }
         // command not allowed in dms
-        if (message.channel.type === "dm" && command.opts.noDM)
-            return message.channel.send(
+        if (message.channel.type === "dm" && command.opts.noDM) {
+            message.channel.send(
                 this.opts.errMsg?.noDM ||
                     "You can't use this command in the dms"
             );
+            return;
+        }
         // user or guild is on blacklist
         if (
             this.opts.blacklist.includes(message.author.id) ||
             command.opts.blacklist?.includes(message.author.id) ||
             this.opts.blacklist.includes(message.guild!?.id) ||
             command.opts.blacklist?.includes(message.guild!?.id)
-        )
-            return message.channel.send(
+        ) {
+            message.channel.send(
                 this.opts.errMsg?.blacklist ||
                     "You've been blacklisted from using this command"
             );
+            return;
+        }
         // too many args
         if (
             command.opts.maxArgs &&
             args.length > command.opts.maxArgs &&
             command.opts.maxArgs > 0
-        )
-            return message.channel.send(
+        ) {
+            message.channel.send(
                 this.opts.errMsg?.tooManyArgs ||
                     `Too many args. For more info, see: ${this.opts.prefix}help ${commandName}`
             );
+            return;
+        }
         // not enough args
-        if (command.opts.minArgs && args.length < command.opts.minArgs)
-            return message.channel.send(
+        if (command.opts.minArgs && args.length < command.opts.minArgs) {
+            message.channel.send(
                 this.opts.errMsg?.tooFewArgs ||
                     `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
             );
+            return;
+        }
         //* command is on cooldown
         if (
             message.channel.type != "dm" &&
@@ -292,10 +333,11 @@ export class Handler extends EventEmitter {
                 if (CD && CD!.expires > Date.now()) {
                     const t = toTime(CD.expires - Date.now(), true);
 
-                    return message.channel.send(
+                    message.channel.send(
                         this.opts.errMsg?.cooldown ||
                             `This command is on cooldown for another ${t}.`
                     );
+                    return;
                 }
 
                 const globalCD = guild?.globalCooldowns.find(
@@ -304,20 +346,25 @@ export class Handler extends EventEmitter {
                 if (globalCD && globalCD!.expires > Date.now()) {
                     const t = toTime(globalCD.expires - Date.now(), true);
 
-                    return message.channel.send(
+                    message.channel.send(
                         this.opts.errMsg?.globalCooldown ||
                             `This command is on cooldown for the entire server for another ${t}.`
                     );
+                    return;
                 }
             }
         }
 
         //* running the actual command
+        // coming soon
+        // const argv = arg(command.opts.argv || {}, { argv: args });
+        const argv = yargs(args).argv;
+
         const res = await command.run({
             client: this.client,
             message,
             args,
-            argv: yargs(args).argv,
+            argv,
             prefix: this.opts.prefix,
             handler: this,
             text,
@@ -391,9 +438,16 @@ export class Handler extends EventEmitter {
                 globalCooldowns: guild.globalCooldowns,
             });
         }
+
+        return res;
     }
 
-    // find a command from any of its names
+    /**
+     * Find a command from any of its aliases
+     * (this is the function used internally for finding commands)
+     * @param {string} name - Name or names of a command
+     * @returns The command or undefined if no command was found
+     */
     public getCommand(name: string | string[]): Command | undefined {
         if (typeof name === "string")
             return (
@@ -409,6 +463,10 @@ export class Handler extends EventEmitter {
         return found;
     }
 
+    /**
+     * Connect to the database (for cooldowns)
+     * @param {string} uri - MongoDB connection string
+     */
     private async dbConnect(uri: string) {
         try {
             await mongoose.connect(uri, {
@@ -430,8 +488,34 @@ export class Handler extends EventEmitter {
             this.emit("dbConnectFailed", err);
         }
     }
-}
 
+    /**
+     * A utility function to create nice embeds.
+     * @param title
+     * @param desc
+     * @param color
+     * @param thumbnail
+     */
+    public makeEmbed(
+        title: string,
+        desc: string,
+        color?: Discord.ColorResolvable,
+        thumbnail?: string
+    ) {
+        const emb = new Discord.MessageEmbed({
+            title,
+            description: desc,
+        })
+            .setAuthor(
+                this.client.user?.username,
+                this.client.user?.displayAvatarURL({ dynamic: true })
+            )
+            .setColor(color || "BLURPLE");
+        if (thumbnail) emb.setThumbnail(thumbnail);
+
+        return emb;
+    }
+}
 export default Handler;
 
 export type Commands = Discord.Collection<string, Command>;
