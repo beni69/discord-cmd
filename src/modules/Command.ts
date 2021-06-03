@@ -10,8 +10,8 @@ export class Command {
 
     /**
      * Create a new command
-     * @param {*} opts - Parameters for the command
-     * @param {*} run - The actual function to run when the command is called
+     * @param {CommandOptions} opts - Parameters for the command
+     * @param {CommandCallback} run - The actual function to run when the command is called
      */
     constructor(opts: CommandOptions, run: CommandCallback) {
         this.run = run;
