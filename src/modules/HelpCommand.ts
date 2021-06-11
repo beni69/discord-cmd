@@ -10,22 +10,22 @@ export interface HelpSettings {
 }
 
 export function init(handler: Handler) {
-    const settings = handler.getOpts.helpCommand!;
+    const settings: HelpSettings = handler.getOpts.helpCommand!;
 
     const command = new Command(
-        { names: settings.names },
-        ({ message, client, handler, text, argv }) => {
+        { names: settings.names, description: "Display help" },
+        ({ trigger, client, handler, text, argv }) => {
             const embed = new MessageEmbed()
                 .setColor(settings?.color || "RANDOM")
                 .setTimestamp()
                 .setFooter(
-                    message.author.tag,
-                    message.author.displayAvatarURL({ dynamic: true })
+                    trigger.author.tag,
+                    trigger.author.displayAvatarURL({ dynamic: true })
                 );
 
             //*  default help command
             if (!text) {
-                embed.setTitle(settings?.title || client.user?.username);
+                embed.setTitle(settings.title || client.user!.username);
                 const commands = handler.getCommands;
                 const categories = new Map<string, Array<Command>>();
 
@@ -36,7 +36,7 @@ export function init(handler: Handler) {
                             item.opts.names !== command.opts.names &&
                             (!item.opts.test ||
                                 handler.getOpts.testServers.has(
-                                    message.guild!.id
+                                    trigger.guild!.id
                                 ))
                     )
                     .forEach(item => {
@@ -60,12 +60,12 @@ export function init(handler: Handler) {
                     );
                     embed.addField(
                         `*${capitalise(c[0].opts.category as string)}*`,
-                        field,
+                        field.join("\n"),
                         true
                     );
                 });
             }
-            //*
+            //* help for a specific command
             else {
                 const command = handler.getCommand(text);
                 if (!command) return;
@@ -76,10 +76,10 @@ export function init(handler: Handler) {
                         command.opts.description ||
                             "This command doesn't have a description."
                     )
-                    .addField("Category", command.opts.category, true);
+                    .addField("Category", command.opts.category!, true);
             }
 
-            message.channel.send({ embed });
+            trigger.channel.send({ embed });
 
             function capitalise(str: string) {
                 return str[0].toUpperCase() + str.substr(1);

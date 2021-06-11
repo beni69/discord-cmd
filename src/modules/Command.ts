@@ -2,6 +2,7 @@ import Discord from "discord.js";
 import { Arguments } from "yargs";
 import Handler from "./Handler";
 import { Logger } from "./Logging";
+import Trigger from "./Trigger";
 import { toMillisec } from "./Utils";
 
 export class Command {
@@ -43,8 +44,10 @@ export default Command;
 
 export type CommandOptions = {
     names: string[] | string;
-    description?: string;
+    description: string;
     category?: string;
+    noClassic?: boolean;
+    noSlash?: boolean;
     adminOnly?: boolean;
     noDM?: boolean;
     test?: boolean;
@@ -54,10 +57,12 @@ export type CommandOptions = {
     maxArgs?: number;
     cooldown?: number | string;
     globalCooldown?: number | string;
+    options?: Array<Discord.ApplicationCommandOptionData>;
 };
 export type CommandParams = {
     client: Discord.Client;
-    message: Discord.Message;
+    // message: Discord.Message;
+    trigger: Trigger;
     args: string[];
     argv: Arguments;
     prefix: string;

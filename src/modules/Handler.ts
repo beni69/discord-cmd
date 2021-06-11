@@ -1,3 +1,4 @@
+import Trigger from "./Trigger";
 import Discord from "discord.js";
 import EventEmitter from "events";
 import mongoose from "mongoose";
@@ -51,6 +52,7 @@ export class Handler extends EventEmitter {
         blacklist,
         pauseCommand,
         ignoreBots = false,
+        testMode = false,
     }: HandlerConstructor) {
         super();
 
@@ -73,6 +75,7 @@ export class Handler extends EventEmitter {
             blacklist: blacklist || [],
             pauseCommand,
             ignoreBots,
+            testMode,
         };
         //* setting up built-in modules
         // triggers
@@ -87,6 +90,7 @@ export class Handler extends EventEmitter {
         this.db = false;
 
         if (this.v) console.log("Command handler launching in verbose mode");
+        if (this.v && testMode) console.log("test mode: on");
 
         // load the commands
         this.loadCommands(this.commandsDir);
@@ -112,6 +116,7 @@ export class Handler extends EventEmitter {
     }
 
     /**
+     * **This will be called internally, you dont have to run this yourself**
      * Recursively reads a directory and loads all .js and .ts files
      * (if these files don't export a command they will just be ignored)
      * @param {string} dir - The directory to use
@@ -152,8 +157,32 @@ export class Handler extends EventEmitter {
                     `Command ${entry.path} is set to admin only, but no admins were defined.`
                 );
 
-            // add the command to the collection
+            //* registering classic command
+
             this.commands.set(command.opts.names[0], command);
+
+            //* registering the slash command
+            if (!command.opts.noSlash) {
+                if (!command.opts.description)
+                    throw new Error(
+                        `${command.opts.names[0]}: a description is required for slash commands! (and still recommended otherwise)`
+                    );
+
+                if (this.opts.testMode) {
+                    // only register in the test servers
+                    for (const GID of this.opts.testServers) {
+                        const guild = await this.client.guilds.fetch(GID);
+
+                        guild?.commands.create({
+                            name: command.opts.names[0],
+                            description: command.opts.description,
+                        });
+                    }
+                } else {
+                    // register globally
+                    // TODO: global slash
+                }
+            }
         }
 
         if (!reload || this.v)
@@ -177,6 +206,28 @@ export class Handler extends EventEmitter {
         // listen only once
         if (this.listening) return;
         this.listening = true;
+
+        this.client.on("interaction", async interaction => {
+            if (!interaction.isCommand()) return;
+            // console.log(interaction);
+
+            //* saving guild to db
+            if (
+                this.db &&
+                !(await models.guild.findById(interaction.guild!.id))
+            ) {
+                const g = new models.guild({
+                    _id: interaction.guild!.id,
+                    cooldowns: [],
+                    globalCooldowns: [],
+                });
+                await g.save();
+            }
+
+            const command = this.getCommand(interaction.commandName);
+            if (!command || command.opts.noSlash) return;
+            this.executeCommand(command, new Trigger(interaction));
+        });
 
         this.client.on("message", async message => {
             if (
@@ -218,63 +269,68 @@ export class Handler extends EventEmitter {
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
             const command = this.getCommand(commandName);
-
-            await this.executeCommand(message, command);
+            if (!command || command.opts.noClassic) return;
+            await this.executeCommand(command, new Trigger(message));
         });
     }
 
     /**
-     * Execute a command.
-     * (this is the function used internally for launching the commands)
-     * @param {Discord.Message} message - The message that contains the command
-     * @param {Command} command - The command to execute. (pro tip: combine with handler.getCommand)
-     * @returns void
+     * Validate whether a user can execute a command in the provided context
      */
-    public async executeCommand(
-        message: Discord.Message,
-        command: Command | undefined
-    ) {
-        // not a command
-        if (!command) return;
+    public async validateCommand(command: Command, trigger: Trigger) {
+        //* Classic only
+        if (trigger.isClassic()) {
+            const args = trigger.source.content
+                .slice(this.opts.prefix.length)
+                .trim()
+                .split(/\s+/);
+            const commandName = args.shift()!.toLowerCase();
 
-        const args = message.content
-            .slice(this.opts.prefix.length)
-            .trim()
-            .split(/\s+/);
+            // too many args
+            if (
+                command.opts.maxArgs &&
+                args.length > command.opts.maxArgs &&
+                command.opts.maxArgs > 0
+            ) {
+                trigger.channel.send(
+                    this.opts.errMsg?.tooManyArgs ||
+                        `Too many args. For more info, see: ${this.opts.prefix}help ${commandName}`
+                );
+                return;
+            }
+            // not enough args
+            if (command.opts.minArgs && args.length < command.opts.minArgs) {
+                trigger.channel.send(
+                    this.opts.errMsg?.tooFewArgs ||
+                        `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
+                );
+                return;
+            }
+        }
 
-        // removes first item of args and that is the command name
-        const commandName = args.shift()!.toLowerCase();
-
-        // text is just all the args without the command name
-        const text = message.content.replace(
-            this.opts.prefix + commandName,
-            ""
-        );
-
-        //* error checking
         // command is test servers only
         if (
             command.opts.test &&
-            !this.opts.testServers.has(message.guild!.id)
+            !this.opts.testServers.has(trigger.guild!.id)
         ) {
             console.log(
-                `${message.author.tag} tried to use test command: ${command.opts.names[0]}`
+                `${trigger.author.tag} tried to use test command: ${command.opts.names[0]}`
             );
             return;
         }
         // command is admins only
         if (
             command.opts.adminOnly &&
-            !this.opts.admins.has(message.author.id)
+            !this.opts.admins.has(trigger.author.id)
         ) {
-            message.channel.send(
+            trigger.channel.send(
                 this.opts.errMsg?.noAdmin || "You can't run this command!"
             );
             return;
         }
         // command not allowed in dms
-        if (message.channel.type === "dm" && command.opts.noDM) {
-            message.channel.send(
+        if (trigger.channel.type === "dm" && command.opts.noDM) {
+            trigger.channel.send(
                 this.opts.errMsg?.noDM ||
                     "You can't use this command in the dms"
             );
@@ -282,58 +338,38 @@ export class Handler extends EventEmitter {
         }
         // user or guild is on blacklist
         if (
-            this.opts.blacklist.includes(message.author.id) ||
-            command.opts.blacklist?.includes(message.author.id) ||
-            this.opts.blacklist.includes(message.guild!?.id) ||
-            command.opts.blacklist?.includes(message.guild!?.id)
+            this.opts.blacklist.includes(trigger.author.id) ||
+            command.opts.blacklist?.includes(trigger.author.id) ||
+            this.opts.blacklist.includes(trigger.guild!?.id) ||
+            command.opts.blacklist?.includes(trigger.guild!?.id)
         ) {
-            message.channel.send(
+            trigger.channel.send(
                 this.opts.errMsg?.blacklist ||
                     "You've been blacklisted from using this command"
             );
             return;
         }
-        // too many args
-        if (
-            command.opts.maxArgs &&
-            args.length > command.opts.maxArgs &&
-            command.opts.maxArgs > 0
-        ) {
-            message.channel.send(
-                this.opts.errMsg?.tooManyArgs ||
-                    `Too many args. For more info, see: ${this.opts.prefix}help ${commandName}`
-            );
-            return;
-        }
-        // not enough args
-        if (command.opts.minArgs && args.length < command.opts.minArgs) {
-            message.channel.send(
-                this.opts.errMsg?.tooFewArgs ||
-                    `Not enough args. For more info, see: ${this.opts.prefix}help ${commandName}`
-            );
-            return;
-        }
         //* command is on cooldown
         if (
-            message.channel.type != "dm" &&
+            trigger.channel.type != "dm" &&
             ((command.opts.cooldown as number) > 0 ||
                 (command.opts.globalCooldown as number) > 0)
         ) {
             // const guild = this.cache.get(message.guild!.id);
             const guild: models.guild | null = (await models.guild.findById(
-                message.guild!.id
+                trigger.guild!.id
             )) as models.guild;
 
             if (guild) {
                 const CD = guild?.cooldowns.find(
                     cd =>
-                        cd.user == message.author.id &&
+                        cd.user == trigger.author.id &&
                         cd.command == command.opts.names[0]
                 );
                 if (CD && CD!.expires > Date.now()) {
                     const t = toTime(CD.expires - Date.now(), true);
 
-                    message.channel.send(
+                    trigger.channel.send(
                         this.opts.errMsg?.cooldown ||
                             `This command is on cooldown for another ${t}.`
                     );
@@ -346,7 +382,7 @@ export class Handler extends EventEmitter {
                 if (globalCD && globalCD!.expires > Date.now()) {
                     const t = toTime(globalCD.expires - Date.now(), true);
 
-                    message.channel.send(
+                    trigger.channel.send(
                         this.opts.errMsg?.globalCooldown ||
                             `This command is on cooldown for the entire server for another ${t}.`
                     );
@@ -354,15 +390,42 @@ export class Handler extends EventEmitter {
                 }
             }
         }
+    }
+
+    /**
+     * Execute a command.
+     * (this is the function used internally for launching the commands)
+     * @param {Discord.Message} trigger - The message that contains the command
+     * @param {Command} command - The command to execute. (pro tip: combine with handler.getCommand)
+     * @returns void
+     */
+    public async executeCommand(
+        command: Command | undefined,
+        trigger: Trigger
+    ) {
+        // not a command
+        if (!command) return;
+
+        const args = trigger.content
+            .slice(this.opts.prefix.length)
+            .trim()
+            .split(/\s+/);
+
+        // removes first item of args and that is the command name
+        const commandName = args.shift()!.toLowerCase();
+
+        // text is just all the args without the command name
+        const text = trigger.content.replace(
+            this.opts.prefix + commandName,
+            ""
+        );
 
         //* running the actual command
-        // coming soon
-        // const argv = arg(command.opts.argv || {}, { argv: args });
         const argv = yargs(args).argv;
 
         const res = await command.run({
             client: this.client,
-            message,
+            trigger,
             args,
             argv,
             prefix: this.opts.prefix,
@@ -371,11 +434,11 @@ export class Handler extends EventEmitter {
             logger: this.logger,
         });
 
-        if (command.opts.react && res !== false)
-            React(message, command.opts.react);
+        if (trigger.isClassic() && command.opts.react && res !== false)
+            React(trigger.source, command.opts.react);
 
         //* log the command
-        if (this.logger) this.logger.log(message);
+        if (this.logger) this.logger.log(trigger);
 
         //* apply the cooldown (not if command falied)
         if (
@@ -383,25 +446,25 @@ export class Handler extends EventEmitter {
             (command.opts.cooldown || command.opts.globalCooldown)
         ) {
             const guild: models.guild | null = (await models.guild.findById(
-                message.guild!.id
+                trigger.guild!.id
             )) as models.guild;
 
             if (command.opts.cooldown) {
                 // adding the cooldown
                 guild?.cooldowns.push({
-                    user: message.author.id,
+                    user: trigger.author.id,
                     command: command.opts.names[0],
                     expires: Date.now() + (command.opts.cooldown as number),
                 });
                 // removing the cooldown after it expired
                 this.client.setTimeout(async () => {
                     const g: models.guild | null = (await models.guild.findById(
-                        message.guild!.id
+                        trigger.guild!.id
                     )) as models.guild;
 
                     const i = g?.cooldowns.findIndex(
                         cd =>
-                            cd.user == message.author.id &&
+                            cd.user == trigger.author.id &&
                             cd.command == command.opts.names[0]
                     );
                     if (i === -1) return;
@@ -418,7 +481,7 @@ export class Handler extends EventEmitter {
                 });
                 this.client.setTimeout(async () => {
                     const g: models.guild | null = (await models.guild.findById(
-                        message.guild!.id
+                        trigger.guild!.id
                     )) as models.guild;
 
                     const i = g?.globalCooldowns.findIndex(
@@ -507,7 +570,7 @@ export class Handler extends EventEmitter {
             description: desc,
         })
             .setAuthor(
-                this.client.user?.username,
+                this.client.user!.username,
                 this.client.user?.displayAvatarURL({ dynamic: true })
             )
             .setColor(color || "BLURPLE");
@@ -528,6 +591,7 @@ export type HandlerOpions = {
     blacklist: Array<Discord.Snowflake>;
     pauseCommand?: string;
     ignoreBots?: boolean;
+    testMode?: boolean;
     errMsg?: {
         tooFewArgs?: string;
         tooManyArgs?: string;
@@ -552,6 +616,7 @@ export type HandlerConstructor = {
     blacklist?: Array<Discord.Snowflake>;
     pauseCommand?: string;
     ignoreBots?: boolean;
+    testMode?: boolean;
 };
 export type HandlerEvents = {
     ready: () => void;
@@ -559,4 +624,3 @@ export type HandlerEvents = {
     dbConnectFailed: (err: unknown) => void;
     dbSynced: () => void;
 };
-export type HandlerCache = Discord.Collection<string, models.guild>;
