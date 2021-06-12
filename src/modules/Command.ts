@@ -1,8 +1,14 @@
-import Discord from "discord.js";
+import {
+    ApplicationCommandOptionData,
+    Client,
+    Collection,
+    EmojiIdentifierResolvable,
+    Snowflake,
+} from "discord.js";
 import { Arguments } from "yargs";
 import Handler from "./Handler";
 import { Logger } from "./Logging";
-import Trigger from "./Trigger";
+import { Trigger } from "./Trigger";
 import { toMillisec } from "./Utils";
 
 export class Command {
@@ -43,6 +49,7 @@ export class Command {
 export default Command;
 
 export type CommandOptions = {
+    // general
     names: string[] | string;
     description: string;
     category?: string;
@@ -51,26 +58,29 @@ export type CommandOptions = {
     adminOnly?: boolean;
     noDM?: boolean;
     test?: boolean;
-    react?: Discord.EmojiIdentifierResolvable;
-    blacklist?: Array<Discord.Snowflake>;
-    minArgs?: number;
-    maxArgs?: number;
+    blacklist?: Array<Snowflake>;
     cooldown?: number | string;
     globalCooldown?: number | string;
-    options?: Array<Discord.ApplicationCommandOptionData>;
+    // classic
+    react?: EmojiIdentifierResolvable;
+    minArgs?: number;
+    maxArgs?: number;
+    argvAliases?: { [key: string]: string[] };
+    // slash
+    options?: Array<ApplicationCommandOptionData>;
+    ephemeral?: boolean;
+    deferred?: boolean;
 };
 export type CommandParams = {
-    client: Discord.Client;
-    // message: Discord.Message;
+    client: Client;
     trigger: Trigger;
     args: string[];
-    argv: Arguments;
+    argv: Collection<string, any>;
     prefix: string;
     handler: Handler;
     text: string;
     logger?: Logger;
 };
-
 export type CommandCallback = (
     params: CommandParams
 ) => void | false | Promise<void | false>;

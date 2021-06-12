@@ -1,15 +1,14 @@
-import Trigger from "./Trigger";
 import Discord from "discord.js";
 import EventEmitter from "events";
 import mongoose from "mongoose";
 import { dirname as pathDirname, join as pathJoin } from "path";
 import readdirp from "readdirp";
-import yargs from "yargs";
 import Command from "./Command";
 import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
 import { React } from "./Reaction";
+import Trigger from "./Trigger";
 import { cleanDB, toTime } from "./Utils";
 
 export interface Handler {
@@ -145,15 +144,15 @@ export class Handler extends EventEmitter {
 
             // error checking
             if (command === undefined)
-                throw new Error(
+                throw this.Error(
                     `Couldn't import command from ${entry.path}. Make sure you are exporting a command variable that is a new Command`
                 );
             if (this.getCommand(command.opts.names) !== undefined)
-                throw new Error(
+                throw this.Error(
                     `Command name ${command.opts.names[0]} is being used twice!`
                 );
             if (command.opts.adminOnly && this.opts.admins.size == 0)
-                throw new Error(
+                throw this.Error(
                     `Command ${entry.path} is set to admin only, but no admins were defined.`
                 );
 
@@ -164,23 +163,29 @@ export class Handler extends EventEmitter {
             //* registering the slash command
             if (!command.opts.noSlash) {
                 if (!command.opts.description)
-                    throw new Error(
+                    throw this.Error(
                         `${command.opts.names[0]}: a description is required for slash commands! (and still recommended otherwise)`
                     );
 
-                if (this.opts.testMode) {
+                if (this.opts.testMode || command.opts.test) {
                     // only register in the test servers
                     for (const GID of this.opts.testServers) {
                         const guild = await this.client.guilds.fetch(GID);
 
-                        guild?.commands.create({
-                            name: command.opts.names[0],
+                        await guild?.commands.create({
+                            name: command.opts.names[0].toLowerCase(),
                             description: command.opts.description,
+                            options: command.opts.options,
                         });
                     }
                 } else {
                     // register globally
-                    // TODO: global slash
+                    // // TODO: global slash
+                    await this.client.application?.commands.create({
+                        name: command.opts.names[0].toLowerCase(),
+                        options: command.opts.options,
+                        description: command.opts.description,
+                    });
                 }
             }
         }
@@ -226,7 +231,7 @@ export class Handler extends EventEmitter {
 
             const command = this.getCommand(interaction.commandName);
             if (!command || command.opts.noSlash) return;
-            this.executeCommand(command, new Trigger(interaction));
+            this.executeCommand(new Trigger(this, command, interaction));
         });
 
         this.client.on("message", async message => {
@@ -270,7 +275,7 @@ export class Handler extends EventEmitter {
             const commandName = args.shift()!.toLowerCase();
             const command = this.getCommand(commandName);
             if (!command || command.opts.noClassic) return;
-            await this.executeCommand(command, new Trigger(message));
+            await this.executeCommand(new Trigger(this, command, message));
         });
     }
 
@@ -349,6 +354,7 @@ export class Handler extends EventEmitter {
             );
             return;
         }
+
         //* command is on cooldown
         if (
             trigger.channel.type != "dm" &&
@@ -395,14 +401,11 @@ export class Handler extends EventEmitter {
     /**
      * Execute a command.
      * (this is the function used internally for launching the commands)
-     * @param {Discord.Message} trigger - The message that contains the command
-     * @param {Command} command - The command to execute. (pro tip: combine with handler.getCommand)
+     * @param {Trigger} trigger - The message that contains the command
      * @returns void
      */
-    public async executeCommand(
-        command: Command | undefined,
-        trigger: Trigger
-    ) {
+    public async executeCommand(trigger: Trigger) {
+        const { command } = trigger;
         // not a command
         if (!command) return;
 
@@ -410,19 +413,20 @@ export class Handler extends EventEmitter {
             .slice(this.opts.prefix.length)
             .trim()
             .split(/\s+/);
-
         // removes first item of args and that is the command name
         const commandName = args.shift()!.toLowerCase();
-
         // text is just all the args without the command name
-        const text = trigger.content.replace(
-            this.opts.prefix + commandName,
-            ""
+        // const text = trigger.content.replace(
+        //     this.opts.prefix + commandName,
+        //     ""
+        // );
+        const text = trigger.content.substring(
+            this.opts.prefix.length + commandName.length
         );
+        // const argv = yargs(args).argv;
+        const argv = trigger.argv;
 
         //* running the actual command
-        const argv = yargs(args).argv;
-
         const res = await command.run({
             client: this.client,
             trigger,
@@ -552,6 +556,10 @@ export class Handler extends EventEmitter {
         }
     }
 
+    private Error(msg?: string): HandlerError {
+        return new Error(msg);
+    }
+
     /**
      * A utility function to create nice embeds.
      * @param title
@@ -624,3 +632,4 @@ export type HandlerEvents = {
     dbConnectFailed: (err: unknown) => void;
     dbSynced: () => void;
 };
+export interface HandlerError extends Error {}
