@@ -1,4 +1,4 @@
-import Discord from "discord.js";
+import Discord, { ApplicationCommandData } from "discord.js";
 import EventEmitter from "events";
 import mongoose from "mongoose";
 import { dirname as pathDirname, join as pathJoin } from "path";
@@ -9,7 +9,8 @@ import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
 import { React } from "./Reaction";
 import Trigger from "./Trigger";
-import { cleanDB, toTime } from "./Utils";
+import { cleanDB } from "./Utils";
+import ms from "ms";
 
 export interface Handler {
     on<U extends keyof HandlerEvents>(
@@ -119,10 +120,16 @@ export class Handler extends EventEmitter {
      * Recursively reads a directory and loads all .js and .ts files
      * (if these files don't export a command they will just be ignored)
      * @param {string} dir - The directory to use
-     * @param {boolean} reload - Whether to clear the command list before reading (useful to reload the commands)
      */
-    public async loadCommands(dir: string, reload: boolean = false) {
-        if (reload) this.commands.clear();
+    public async loadCommands(dir: string) {
+        // if (this.opts.testMode)
+        //     this.opts.testServers.forEach(async tsID => {
+        //         const guild = await this.client.guilds.fetch(tsID);
+        //         await guild.commands.set([]);
+        //     });
+
+        const globalSlash: ApplicationCommandData[] = [];
+        const testSlash: ApplicationCommandData[] = [];
 
         if (this.v) console.log(`Loading commands from: ${dir}`);
         for await (const entry of readdirp(dir, {
@@ -151,47 +158,53 @@ export class Handler extends EventEmitter {
                 throw this.Error(
                     `Command name ${command.opts.names[0]} is being used twice!`
                 );
-            if (command.opts.adminOnly && this.opts.admins.size == 0)
+            if (command.opts.adminOnly && this.opts.admins.size === 0)
                 throw this.Error(
                     `Command ${entry.path} is set to admin only, but no admins were defined.`
                 );
+            if (command.opts.test && this.opts.testServers.size === 0)
+                throw this.Error(
+                    `Command ${entry.path} is set to test servers only but no test servers were defined.`
+                );
 
-            //* registering classic command
-
+            //* adding to commands
             this.commands.set(command.opts.names[0], command);
 
             //* registering the slash command
             if (!command.opts.noSlash) {
                 if (!command.opts.description)
                     throw this.Error(
-                        `${command.opts.names[0]}: a description is required for slash commands! (and still recommended otherwise)`
+                        `${entry.path}: a description is required for slash commands! (and still recommended otherwise)`
                     );
 
                 if (this.opts.testMode || command.opts.test) {
                     // only register in the test servers
-                    for (const GID of this.opts.testServers) {
-                        const guild = await this.client.guilds.fetch(GID);
-
-                        await guild?.commands.create({
-                            name: command.opts.names[0].toLowerCase(),
-                            description: command.opts.description,
-                            options: command.opts.options,
-                        });
-                    }
+                    testSlash.push({
+                        name: command.opts.names[0].toLowerCase(),
+                        description: command.opts.description,
+                        options: command.opts.options,
+                    });
                 } else {
                     // register globally
-                    // // TODO: global slash
-                    await this.client.application?.commands.create({
+                    globalSlash.push({
                         name: command.opts.names[0].toLowerCase(),
-                        options: command.opts.options,
                         description: command.opts.description,
+                        options: command.opts.options,
                     });
                 }
             }
         }
 
-        if (!reload || this.v)
-            console.log(`Finished loading ${this.commands.size} commands.`);
+        if (testSlash.length) {
+            for (const GID of this.opts.testServers) {
+                const guild = await this.client.guilds.fetch(GID);
+                await guild.commands.set(testSlash);
+            }
+        }
+        globalSlash.length &&
+            (await this.client.application?.commands.set(globalSlash));
+
+        console.log(`Finished loading ${this.commands.size} commands.`);
 
         if (this.v)
             console.log(
@@ -212,9 +225,8 @@ export class Handler extends EventEmitter {
         if (this.listening) return;
         this.listening = true;
 
-        this.client.on("interaction", async interaction => {
+        this.client.on("interactionCreate", async interaction => {
             if (!interaction.isCommand()) return;
-            // console.log(interaction);
 
             //* saving guild to db
             if (
@@ -231,10 +243,14 @@ export class Handler extends EventEmitter {
 
             const command = this.getCommand(interaction.commandName);
             if (!command || command.opts.noSlash) return;
-            this.executeCommand(new Trigger(this, command, interaction));
+
+            const trigger = new Trigger(this, command, interaction);
+
+            if (await this.validateCommand(trigger))
+                await this.executeCommand(trigger);
         });
 
-        this.client.on("message", async message => {
+        this.client.on("messageCreate", async message => {
             if (
                 (this.paused &&
                     message.content !=
@@ -254,7 +270,7 @@ export class Handler extends EventEmitter {
             }
 
             //* reaction triggers
-            for (const item of this.opts.triggers.keyArray()) {
+            for (const item of [...this.opts.triggers.keys()]) {
                 if (message.content.toLowerCase().includes(item)) {
                     const emoji = this.opts.triggers.get(
                         item
@@ -273,16 +289,23 @@ export class Handler extends EventEmitter {
 
             // removes first item of args and that is the command name
             const commandName = args.shift()!.toLowerCase();
+
             const command = this.getCommand(commandName);
             if (!command || command.opts.noClassic) return;
-            await this.executeCommand(new Trigger(this, command, message));
+
+            const trigger = new Trigger(this, command, message);
+
+            if (await this.validateCommand(trigger))
+                await this.executeCommand(trigger);
         });
     }
 
     /**
      * Validate whether a user can execute a command in the provided context
      */
-    public async validateCommand(command: Command, trigger: Trigger) {
+    public async validateCommand(trigger: Trigger) {
+        const { command } = trigger;
+
         //* Classic only
         if (trigger.isClassic()) {
             const args = trigger.source.content
@@ -334,7 +357,7 @@ export class Handler extends EventEmitter {
             return;
         }
         // command not allowed in dms
-        if (trigger.channel.type === "dm" && command.opts.noDM) {
+        if (trigger.channel.type === "DM" && command.opts.noDM) {
             trigger.channel.send(
                 this.opts.errMsg?.noDM ||
                     "You can't use this command in the dms"
@@ -357,7 +380,7 @@ export class Handler extends EventEmitter {
 
         //* command is on cooldown
         if (
-            trigger.channel.type != "dm" &&
+            trigger.channel.type != "DM" &&
             ((command.opts.cooldown as number) > 0 ||
                 (command.opts.globalCooldown as number) > 0)
         ) {
@@ -373,7 +396,7 @@ export class Handler extends EventEmitter {
                         cd.command == command.opts.names[0]
                 );
                 if (CD && CD!.expires > Date.now()) {
-                    const t = toTime(CD.expires - Date.now(), true);
+                    const t = ms(CD.expires - Date.now(), { long: true });
 
                     trigger.channel.send(
                         this.opts.errMsg?.cooldown ||
@@ -386,7 +409,7 @@ export class Handler extends EventEmitter {
                     cd => cd.command == command.opts.names[0]
                 );
                 if (globalCD && globalCD!.expires > Date.now()) {
-                    const t = toTime(globalCD.expires - Date.now(), true);
+                    const t = ms(globalCD.expires - Date.now(), { long: true });
 
                     trigger.channel.send(
                         this.opts.errMsg?.globalCooldown ||
@@ -396,18 +419,20 @@ export class Handler extends EventEmitter {
                 }
             }
         }
+
+        return true;
     }
 
     /**
      * Execute a command.
      * (this is the function used internally for launching the commands)
-     * @param {Trigger} trigger - The message that contains the command
-     * @returns void
+     * @param {Trigger} trigger - The trigger that lauhched the command
+     * @returns true if successful, false if command falied
      */
     public async executeCommand(trigger: Trigger) {
         const { command } = trigger;
         // not a command
-        if (!command) return;
+        if (!command) return false;
 
         const args = trigger.content
             .slice(this.opts.prefix.length)
@@ -416,20 +441,20 @@ export class Handler extends EventEmitter {
         // removes first item of args and that is the command name
         const commandName = args.shift()!.toLowerCase();
         // text is just all the args without the command name
-        // const text = trigger.content.replace(
-        //     this.opts.prefix + commandName,
-        //     ""
-        // );
-        const text = trigger.content.substring(
-            this.opts.prefix.length + commandName.length
-        );
-        // const argv = yargs(args).argv;
-        const argv = trigger.argv;
+        const text = trigger.content
+            .substring(this.opts.prefix.length + commandName.length)
+            .trim();
+        const { argv } = trigger;
+        const { deferred, ephemeral } = command.opts;
+
+        // defer interaction
+        if (trigger.isSlash() && deferred)
+            await trigger.source.deferReply({ ephemeral });
 
         //* running the actual command
         const res = await command.run({
             client: this.client,
-            trigger,
+            trigger: trigger as any,
             args,
             argv,
             prefix: this.opts.prefix,
@@ -461,7 +486,7 @@ export class Handler extends EventEmitter {
                     expires: Date.now() + (command.opts.cooldown as number),
                 });
                 // removing the cooldown after it expired
-                this.client.setTimeout(async () => {
+                setTimeout(async () => {
                     const g: models.guild | null = (await models.guild.findById(
                         trigger.guild!.id
                     )) as models.guild;
@@ -483,7 +508,7 @@ export class Handler extends EventEmitter {
                     expires:
                         Date.now() + (command.opts.globalCooldown as number),
                 });
-                this.client.setTimeout(async () => {
+                setTimeout(async () => {
                     const g: models.guild | null = (await models.guild.findById(
                         trigger.guild!.id
                     )) as models.guild;
@@ -506,7 +531,7 @@ export class Handler extends EventEmitter {
             });
         }
 
-        return res;
+        return res === false ? res : true;
     }
 
     /**
@@ -633,3 +658,5 @@ export type HandlerEvents = {
     dbSynced: () => void;
 };
 export interface HandlerError extends Error {}
+
+// FIXME: cooldowns

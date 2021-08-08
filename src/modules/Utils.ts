@@ -1,34 +1,13 @@
-import { MessageEmbed, MessageEmbedOptions } from "discord.js";
+import {
+    Guild,
+    GuildChannel,
+    GuildMember,
+    MessageEmbed,
+    Role,
+    User,
+} from "discord.js";
+import { ApplicationCommandOptionTypes } from "discord.js/typings/enums";
 import * as models from "./Models";
-
-// convert strings like "5m" and "24h" to milliseconds
-export function toMillisec(str: string) {
-    if (str.endsWith("ms") || /^\d+$/.test(str)) return parseInt(str);
-    else if (str.endsWith("s")) return parseInt(str) * 1000;
-    else if (str.endsWith("m")) return parseInt(str) * 60000;
-    else if (str.endsWith("h")) return parseInt(str) * 3600000;
-    else if (str.endsWith("d")) return parseInt(str) * 86400000;
-    else return null;
-}
-
-// convert milliseconds to strings like "2 hours 5 minutes"
-export function toTime(M: number, stringify = false) {
-    M /= 1000;
-    const h = Math.floor(M / 3600);
-    const m = Math.floor((M % 3600) / 60);
-    const s = Math.floor((M % 3600) % 60);
-
-    if (stringify) {
-        let str = "";
-        str += h ? `${h} hours ` : "";
-        str += m ? `${m} minutes ` : "";
-        str += s ? `${s} seconds ` : "";
-
-        return str.trim();
-    }
-
-    return { M, h, m, s };
-}
 
 // remove expired cooldowns from the database
 export async function cleanDB() {
@@ -61,3 +40,53 @@ export async function cleanDB() {
 export function newEmbed(title: string, msg: string) {
     return new MessageEmbed({ title, description: msg }).setTimestamp();
 }
+
+export const resolveUser = (str: string) => str.replace(/\<|\>|@|!/gi, "");
+
+/**
+ * get the type and resolved data (if possible) from a string
+ * @example user: <@123...> or <@!123...>
+ * @example role: <@&123...>
+ * @example channel: <#123...>
+ * @param guild the discordjs client to use for resolving
+ * @param x the option to resolve
+ */
+export const resolveMention = (
+    guild: Guild,
+    x: any
+): {
+    type: keyof typeof ApplicationCommandOptionTypes;
+    value: any;
+    user?: User;
+    member?: GuildMember;
+    channel?: GuildChannel;
+    role?: Role;
+} => {
+    // get built in types out of the way
+    if (x === !!x) return { type: "BOOLEAN", value: x };
+    if (!isNaN(parseInt(x) || parseFloat(x)))
+        return { type: "NUMBER", value: x };
+    // not a mention, just a regular string
+    // if (!/^<(@|@!|@&|#).>$/im.test(x)) return { type: "STRING", value: x };
+
+    let value: any = null;
+    let res: any = null;
+
+    value = /^<@!?(\d{18,20})>$/.exec(x)?.[1];
+    if (value) res = guild.client.users.resolve(value);
+    let member;
+    if (res && "members" in guild) member = guild.members.resolve(res);
+    if (res) return { type: "USER", value, user: res, member };
+
+    value = /^<@&(\d{18,20})>$/.exec(x)?.[1];
+    if (value) res = guild.roles.resolve(value);
+    if (res) return { type: "ROLE", value, role: res };
+
+    value = /^<#(\d{18,20})>$/.exec(x)?.[1];
+    if (value) res = guild.channels.resolve(value);
+    if (res) return { type: "CHANNEL", value, channel: res };
+
+    // fallback
+    console.error("BRUH BRUH BRUH");
+    return { type: "STRING", value: x };
+};

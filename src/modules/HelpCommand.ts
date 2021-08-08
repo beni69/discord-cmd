@@ -79,7 +79,7 @@ export function init(handler: Handler) {
                     .addField("Category", command.opts.category!, true);
             }
 
-            trigger.channel.send({ embed });
+            trigger.channel.send({ embeds: [embed] });
 
             function capitalise(str: string) {
                 return str[0].toUpperCase() + str.substr(1);

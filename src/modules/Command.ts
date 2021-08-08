@@ -1,15 +1,14 @@
 import {
     ApplicationCommandOptionData,
     Client,
-    Collection,
+    CommandInteractionOptionResolver,
     EmojiIdentifierResolvable,
     Snowflake,
 } from "discord.js";
-import { Arguments } from "yargs";
+import ms from "ms";
 import Handler from "./Handler";
 import { Logger } from "./Logging";
-import { Trigger } from "./Trigger";
-import { toMillisec } from "./Utils";
+import { ClassicTrigger, SlashTrigger } from "./Trigger";
 
 export class Command {
     opts: CommandOptions & { names: string[] };
@@ -28,7 +27,7 @@ export class Command {
         if (typeof opts.names === "string") this.opts.names = [opts.names];
 
         if (opts.cooldown) {
-            const cd = toMillisec(opts.cooldown.toString());
+            const cd = ms(opts.cooldown.toString());
             if (!cd)
                 throw new Error(
                     `Cooldown for command ${this.opts.names[0]} is not in a valid format.`
@@ -37,7 +36,7 @@ export class Command {
         }
 
         if (opts.globalCooldown) {
-            const cd = toMillisec(opts.globalCooldown.toString());
+            const cd = ms(opts.globalCooldown.toString());
             if (!cd)
                 throw new Error(
                     `Global cooldown for command ${this.opts.names[0]} is not in a valid format.`
@@ -73,9 +72,10 @@ export type CommandOptions = {
 };
 export type CommandParams = {
     client: Client;
-    trigger: Trigger;
+    // trigger: Trigger;
+    trigger: ClassicTrigger | SlashTrigger;
     args: string[];
-    argv: Collection<string, any>;
+    argv: CommandInteractionOptionResolver;
     prefix: string;
     handler: Handler;
     text: string;

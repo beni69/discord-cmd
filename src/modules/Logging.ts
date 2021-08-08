@@ -38,9 +38,9 @@ export class Logger {
             .replace("$content$", trigger.content)
             .replace(
                 "$channelName$",
-                trigger.channel.type === "dm"
+                trigger.channel.type === "DM"
                     ? trigger.author.tag
-                    : trigger.channel.name
+                    : trigger.channel?.name
             )
             .replace("$channelTag$", trigger.channel.toString())
             .replace(
