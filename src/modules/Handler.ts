@@ -319,6 +319,8 @@ export class Handler extends EventEmitter {
             ((command.opts.cooldown as number) > 0 ||
                 (command.opts.globalCooldown as number) > 0)
         ) {
+            if (message.webhookID) return;
+
             // const guild = this.cache.get(message.guild!.id);
             const guild: models.guild | null = (await models.guild.findById(
                 message.guild!.id
