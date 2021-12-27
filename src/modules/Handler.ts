@@ -24,7 +24,7 @@ export interface Handler {
 }
 
 export class Handler extends EventEmitter {
-    readonly client: Discord.Client;
+    readonly client: Discord.Client<boolean>;
     public commands: Commands;
     private commandsDir: string;
     private opts: HandlerOpions;
@@ -575,7 +575,7 @@ export class Handler extends EventEmitter {
         } catch (err) {
             console.error(
                 "Handler failed to connect to MongoDB: ",
-                err.message
+                (err as Error).message
             );
             this.emit("dbConnectFailed", err);
         }

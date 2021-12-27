@@ -76,7 +76,8 @@ export const resolveMention = (
     if (value) res = guild.client.users.resolve(value);
     let member;
     if (res && "members" in guild) member = guild.members.resolve(res);
-    if (res) return { type: "USER", value, user: res, member };
+    if (res)
+        return { type: "USER", value, user: res, member: member ?? undefined };
 
     value = /^<@&(\d{18,20})>$/.exec(x)?.[1];
     if (value) res = guild.roles.resolve(value);
@@ -87,6 +88,5 @@ export const resolveMention = (
     if (res) return { type: "CHANNEL", value, channel: res };
 
     // fallback
-    console.error("BRUH BRUH BRUH");
     return { type: "STRING", value: x };
 };

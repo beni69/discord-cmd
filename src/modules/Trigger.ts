@@ -62,16 +62,6 @@ export class Trigger {
         if ("author" in source) {
             this.author = source.author;
             this.content = source.content;
-            // this.argv = this.args2Coll(
-            //     this.content.substring(
-            //         this.handler.getOpts.prefix.length +
-            //             this.content
-            //                 .slice(this.handler.getOpts.prefix.length)
-            //                 .trim()
-            //                 .split(/\s+/)
-            //                 .shift()?.length!
-            //     )
-            // );
             this.argv = this.args2Opt(this.args);
         } else {
             this.author = source.user;
@@ -79,7 +69,7 @@ export class Trigger {
                 source.options && source.options.data.map(o => o.value)
             }`.trim();
             // this.argv = source.options.mapValues(o => o.value);
-            this.argv = source.options;
+            this.argv = source.options as any;
         }
     }
 
@@ -117,10 +107,10 @@ export class Trigger {
             );
     };
 
-    public fetchReply = () => {
+    public fetchReply = async () => {
         if (this.isClassic()) return this.response;
         else if (this.isSlash())
-            return this.source.fetchReply() as Promise<Message>;
+            return (await this.source.fetchReply()) as Message;
     };
 
     public edit = (msg: string | MessagePayload) => {
@@ -147,8 +137,6 @@ export class Trigger {
     };
 
     private args2Opt = (args: string[]): CommandInteractionOptionResolver => {
-        const argv = yargs(args);
-
         const opts: CommandInteractionOption[] = [];
 
         this.command.opts.options?.forEach((o, i) => {
@@ -162,51 +150,12 @@ export class Trigger {
                 return;
             }
 
+            // @ts-ignore
             opts.push({ ...res, name: o.name });
         });
 
+        // @ts-ignore
         return new CommandInteractionOptionResolver(this.client, opts);
-    };
-
-    private args2Coll = (args: string | string[]): Collection<string, any> => {
-        const collection = new Collection<TriggerArgKeys, any>();
-
-        const add = (key: string, value: any) => {
-            // make snowflake resolvable
-            if (
-                (["USER", "CHANNEL"] as any[]).includes(
-                    this.command.opts.options?.find(op => op.name === key)?.type
-                )
-            ) {
-                value = (value + "").replace(/\!|\@|\#|\<|\>/gi, "");
-            }
-
-            collection.set(key, value);
-        };
-
-        const argv = yargs(args);
-
-        const aliases = this.command.opts.argvAliases;
-
-        if (aliases) {
-            const keys = Object.keys(aliases);
-
-            keys.forEach(key => {
-                aliases[key].forEach(
-                    alias => argv[alias] && add(key, argv[alias])
-                );
-                argv[key] && add(key, argv[key]);
-            });
-        }
-
-        if (this.command.opts.options)
-            this.command.opts.options.forEach(o => {
-                argv[o.name] && add(o.name, argv[o.name]);
-            });
-
-        collection.set("_yargs", argv);
-
-        return collection;
     };
 }
 export interface ClassicTrigger extends Trigger {
