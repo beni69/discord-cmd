@@ -400,7 +400,8 @@ export class Handler extends EventEmitter {
             ((command.opts.cooldown as number) > 0 ||
                 (command.opts.globalCooldown as number) > 0)
         ) {
-            // const guild = this.cache.get(message.guild!.id);
+            if (trigger.isClassic() && trigger.source.webhookId) return;
+
             const guild: models.guild | null = (await models.guild.findById(
                 trigger.guild!.id
             )) as models.guild;
