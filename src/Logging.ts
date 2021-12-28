@@ -1,4 +1,5 @@
 import Discord from "discord.js";
+import Trigger from "./Trigger";
 
 export class Logger {
     readonly client: Discord.Client;
@@ -20,8 +21,8 @@ export class Logger {
         this.format = format;
     }
 
-    log(message: Discord.Message, format: LoggerFormat = this.format) {
-        const str = this.getFormat(message, format);
+    log(trigger: Trigger, format: LoggerFormat = this.format) {
+        const str = this.getFormat(trigger, format);
 
         this.channels.forEach(ch => ch.send(str));
     }
@@ -29,24 +30,24 @@ export class Logger {
         this.channels.forEach(ch => ch.send(str));
     }
 
-    getFormat(message: Discord.Message, format: LoggerFormat | string) {
+    getFormat(trigger: Trigger, format: LoggerFormat | string) {
         format = typeof format === "object" ? format.join("") : format;
         return format
-            .replace("$authorName$", message.author.tag)
-            .replace("$authorTag$", message.author.toString())
-            .replace("$content$", message.content)
+            .replace("$authorName$", trigger.author.tag)
+            .replace("$authorTag$", trigger.author.toString())
+            .replace("$content$", trigger.content)
             .replace(
                 "$channelName$",
-                message.channel.type === "dm"
-                    ? message.author.tag
-                    : message.channel.name
+                trigger.channel.type === "DM"
+                    ? trigger.author.tag
+                    : trigger.channel?.name
             )
-            .replace("$channelTag$", message.channel.toString())
+            .replace("$channelTag$", trigger.channel.toString())
             .replace(
                 "$serverName$",
-                message.guild?.name || message.author.toString()
+                trigger.guild?.name || trigger.author.toString()
             )
-            .replace("$timestamp$", message.createdAt.toLocaleString());
+            .replace("$timestamp$", trigger.createdAt.toLocaleString());
     }
 }
 export default Logger;
