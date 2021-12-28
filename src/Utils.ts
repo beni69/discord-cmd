@@ -1,7 +1,11 @@
 import {
+    ApplicationCommand,
+    ApplicationCommandData,
+    Collection,
     Guild,
     GuildChannel,
     GuildMember,
+    GuildResolvable,
     MessageEmbed,
     Role,
     User,
@@ -66,8 +70,6 @@ export const resolveMention = (
     if (x === !!x) return { type: "BOOLEAN", value: x };
     if (!isNaN(parseInt(x) || parseFloat(x)))
         return { type: "NUMBER", value: x };
-    // not a mention, just a regular string
-    // if (!/^<(@|@!|@&|#).>$/im.test(x)) return { type: "STRING", value: x };
 
     let value: any = null;
     let res: any = null;
@@ -80,13 +82,46 @@ export const resolveMention = (
         return { type: "USER", value, user: res, member: member ?? undefined };
 
     value = /^<@&(\d{18,20})>$/.exec(x)?.[1];
-    if (value) res = guild.roles.resolve(value);
+    if (value && "roles" in guild) res = guild.roles.resolve(value);
     if (res) return { type: "ROLE", value, role: res };
 
     value = /^<#(\d{18,20})>$/.exec(x)?.[1];
-    if (value) res = guild.channels.resolve(value);
+    if (value && "channels" in guild) res = guild.channels.resolve(value);
     if (res) return { type: "CHANNEL", value, channel: res };
 
     // fallback
     return { type: "STRING", value: x };
 };
+
+export const slashCommandsChanged = (
+    _o: Collection<string, ApplicationCommand<{ guild: GuildResolvable }>>,
+    _n: ApplicationCommandData[]
+): boolean => {
+    // convert the collection to an array
+    let o = [..._o.values()]
+            .map(
+                c =>
+                    ({
+                        name: c.name,
+                        description: c.description,
+                        options: c.options
+                            ? c.options.map(o => ({
+                                  name: o.name,
+                                  description: o.description,
+                                  type: o.type,
+                                  required: (o as any).required ?? false,
+                              }))
+                            : [],
+                    } as ApplicationCommandData)
+            )
+            .sort(sortFN),
+        n = _n.sort(sortFN);
+
+    // dedupe
+    o = [...new Set(o)];
+    n = [...new Set(n)];
+
+    return JSON.stringify(o) !== JSON.stringify(n);
+};
+const sortFN = (a: ApplicationCommandData, b: ApplicationCommandData): number =>
+    a.name.localeCompare(b.name);

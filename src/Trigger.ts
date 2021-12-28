@@ -1,6 +1,5 @@
 import {
     Client,
-    Collection,
     CommandInteraction,
     CommandInteractionOption,
     CommandInteractionOptionResolver,
@@ -16,7 +15,7 @@ import {
     TextChannel,
     User,
 } from "discord.js";
-import yargs from "yargs-parser";
+import yargsParser from "yargs-parser";
 import Command from "./Command";
 import Handler from "./Handler";
 import { resolveMention } from "./Utils";
@@ -62,13 +61,14 @@ export class Trigger {
         if ("author" in source) {
             this.author = source.author;
             this.content = source.content;
-            this.argv = this.args2Opt(this.args);
+            this.argv = command.opts.yargs
+                ? this.args2Yargs(this.args)
+                : this.args2Opt(this.args);
         } else {
             this.author = source.user;
             this.content = `/${source.commandName} ${
                 source.options && source.options.data.map(o => o.value)
             }`.trim();
-            // this.argv = source.options.mapValues(o => o.value);
             this.argv = source.options as any;
         }
     }
@@ -141,6 +141,7 @@ export class Trigger {
 
         this.command.opts.options?.forEach((o, i) => {
             const res = resolveMention(
+                // if the guild doesn't exist, the client is enough
                 this.guild || ({ client: this.client } as Guild),
                 args[i]
             );
@@ -150,10 +151,44 @@ export class Trigger {
                 return;
             }
 
-            // @ts-ignore
-            opts.push({ ...res, name: o.name });
+            opts.push({ ...res, name: o.name } as CommandInteractionOption);
         });
 
+        // private constructor
+        // @ts-ignore
+        return new CommandInteractionOptionResolver(this.client, opts);
+    };
+    private args2Yargs = (args: string[]): CommandInteractionOptionResolver => {
+        const opts: CommandInteractionOption[] = [];
+        const { argvAliases } = this.command.opts;
+
+        const y = yargsParser(args, {
+            alias: argvAliases,
+        });
+        // set the default args to the option key which has an alias of "_"
+        if (argvAliases) {
+            const k = Object.keys(argvAliases).find(k =>
+                argvAliases[k].includes("_")
+            );
+            if (k) y[k] = y["_"].join(" ");
+        }
+
+        this.command.opts.options?.forEach(o => {
+            const res = resolveMention(
+                // if the guild doesn't exist, the client is enough
+                this.guild || ({ client: this.client } as Guild),
+                y[o.name]
+            );
+
+            if (res.type !== o.type) {
+                this.error = new Error("invalid argument type");
+                return;
+            }
+
+            opts.push({ ...res, name: o.name } as CommandInteractionOption);
+        });
+
+        // private constructor
         // @ts-ignore
         return new CommandInteractionOptionResolver(this.client, opts);
     };
@@ -181,5 +216,4 @@ export interface SlashTrigger extends Trigger {
     edit: any;
 }
 export type TriggerOptions = { ephemeral: boolean; deferred: boolean };
-export type TriggerArgKeys = "_yargs" | string;
 export default Trigger;

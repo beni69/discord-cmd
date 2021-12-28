@@ -1,16 +1,23 @@
-import Discord, { ApplicationCommandData } from "discord.js";
+import {
+    ApplicationCommandData,
+    Client,
+    Collection,
+    ColorResolvable,
+    EmojiIdentifierResolvable,
+    MessageEmbed,
+    Snowflake,
+} from "discord.js";
 import EventEmitter from "events";
 import mongoose from "mongoose";
+import ms from "ms";
 import { dirname as pathDirname, join as pathJoin } from "path";
 import readdirp from "readdirp";
 import Command from "./Command";
 import { HelpSettings, init as HelpInit } from "./HelpCommand";
 import { Logger, LoggerOptions } from "./Logging";
 import * as models from "./Models";
-import { React } from "./Reaction";
 import Trigger from "./Trigger";
-import { cleanDB } from "./Utils";
-import ms from "ms";
+import { cleanDB, slashCommandsChanged } from "./Utils";
 
 export interface Handler {
     on<U extends keyof HandlerEvents>(
@@ -24,7 +31,7 @@ export interface Handler {
 }
 
 export class Handler extends EventEmitter {
-    readonly client: Discord.Client<boolean>;
+    readonly client: Client<boolean>;
     public commands: Commands;
     private commandsDir: string;
     private opts: HandlerOpions;
@@ -63,14 +70,14 @@ export class Handler extends EventEmitter {
 
         this.client = client;
         this.commandsDir = pathJoin(pathDirname(process.argv[1]), commandsDir);
-        this.commands = new Discord.Collection();
+        this.commands = new Collection();
         this.v = verbose;
 
         this.opts = {
             prefix,
             admins: new Set(admins),
             testServers: new Set(testServers),
-            triggers: new Discord.Collection(),
+            triggers: new Collection(),
             helpCommand,
             blacklist: blacklist || [],
             pauseCommand,
@@ -89,8 +96,8 @@ export class Handler extends EventEmitter {
         this.paused = false;
         this.db = false;
 
-        if (this.v) console.log("Command handler launching in verbose mode");
-        if (this.v && testMode) console.log("test mode: on");
+        this.v && console.log("Command handler launching in verbose mode");
+        this.v && testMode && console.log("test mode: on");
 
         // load the commands
         this.loadCommands(this.commandsDir);
@@ -122,20 +129,14 @@ export class Handler extends EventEmitter {
      * @param {string} dir - The directory to use
      */
     public async loadCommands(dir: string) {
-        // if (this.opts.testMode)
-        //     this.opts.testServers.forEach(async tsID => {
-        //         const guild = await this.client.guilds.fetch(tsID);
-        //         await guild.commands.set([]);
-        //     });
-
         const globalSlash: ApplicationCommandData[] = [];
         const testSlash: ApplicationCommandData[] = [];
 
-        if (this.v) console.log(`Loading commands from: ${dir}`);
+        this.v && console.log(`Loading commands from: ${dir}`);
         for await (const entry of readdirp(dir, {
             fileFilter: ["*.js", "*.ts"],
         })) {
-            if (this.v) console.log(`Loading command: ${entry.basename}`);
+            this.v && console.log(`Loading command: ${entry.basename}`);
 
             // import the actual file
             const command: Command = (await import(entry.fullPath)).command;
@@ -182,31 +183,46 @@ export class Handler extends EventEmitter {
                     testSlash.push({
                         name: command.opts.names[0].toLowerCase(),
                         description: command.opts.description,
-                        options: command.opts.options,
+                        options: command.opts.options ?? [],
                     });
                 } else {
                     // register globally
                     globalSlash.push({
                         name: command.opts.names[0].toLowerCase(),
                         description: command.opts.description,
-                        options: command.opts.options,
+                        options: command.opts.options ?? [],
                     });
                 }
             }
         }
 
+        this.v && console.log("Registering slash commands...");
+
+        // check if the registered commands are the same
         if (testSlash.length) {
             for (const GID of this.opts.testServers) {
                 const guild = await this.client.guilds.fetch(GID);
-                await guild.commands.set(testSlash);
+                const c = await guild.commands.fetch();
+                if (slashCommandsChanged(c, testSlash))
+                    await guild.commands.set(testSlash);
+                else
+                    this.v &&
+                        console.log(
+                            `skipping test slash commands in guild ${guild.name}`
+                        );
             }
-        }
-        globalSlash.length &&
-            (await this.client.application?.commands.set(globalSlash));
+        } else this.v && console.log("no test slash commands to register");
 
-        console.log(`Finished loading ${this.commands.size} commands.`);
+        if (globalSlash.length) {
+            const c = await this.client.application?.commands.fetch()!;
+            if (slashCommandsChanged(c, globalSlash))
+                await this.client.application?.commands.set(globalSlash);
+            else this.v && console.log("skipping global slash commands");
+        } else this.v && console.log("no global slash commands to register");
 
-        if (this.v)
+        console.log(`Loaded ${this.commands.size} commands.`);
+
+        this.v &&
             console.log(
                 "Commands:",
                 this.commands.map(item => item.opts.names[0])
@@ -274,8 +290,8 @@ export class Handler extends EventEmitter {
                 if (message.content.toLowerCase().includes(item)) {
                     const emoji = this.opts.triggers.get(
                         item
-                    ) as Discord.EmojiIdentifierResolvable;
-                    React(message, emoji);
+                    ) as EmojiIdentifierResolvable;
+                    message.react(emoji);
                 }
             }
 
@@ -463,17 +479,14 @@ export class Handler extends EventEmitter {
             logger: this.logger,
         });
 
-        if (trigger.isClassic() && command.opts.react && res !== false)
-            React(trigger.source, command.opts.react);
+        if (trigger.isClassic() && command.opts.react && res)
+            trigger.source.react(command.opts.react);
 
         //* log the command
         if (this.logger) this.logger.log(trigger);
 
-        //* apply the cooldown (not if command falied)
-        if (
-            res !== false &&
-            (command.opts.cooldown || command.opts.globalCooldown)
-        ) {
+        //* apply the cooldown (only on a successful command)
+        if (res && (command.opts.cooldown || command.opts.globalCooldown)) {
             const guild: models.guild | null = (await models.guild.findById(
                 trigger.guild!.id
             )) as models.guild;
@@ -531,7 +544,7 @@ export class Handler extends EventEmitter {
             });
         }
 
-        return res === false ? res : true;
+        return res ?? false;
     }
 
     /**
@@ -595,10 +608,10 @@ export class Handler extends EventEmitter {
     public makeEmbed(
         title: string,
         desc: string,
-        color?: Discord.ColorResolvable,
+        color?: ColorResolvable,
         thumbnail?: string
     ) {
-        const emb = new Discord.MessageEmbed({
+        const emb = new MessageEmbed({
             title,
             description: desc,
         })
@@ -614,17 +627,18 @@ export class Handler extends EventEmitter {
 }
 export default Handler;
 
-export type Commands = Discord.Collection<string, Command>;
+export type Commands = Collection<string, Command>;
 export type HandlerOpions = {
     prefix: string;
-    admins: Set<Discord.Snowflake>;
-    testServers: Set<Discord.Snowflake>;
-    triggers: Discord.Collection<string, Discord.EmojiIdentifierResolvable>;
+    admins: Set<Snowflake>;
+    testServers: Set<Snowflake>;
+    triggers: Collection<string, EmojiIdentifierResolvable>;
     helpCommand?: HelpSettings;
-    blacklist: Array<Discord.Snowflake>;
+    blacklist: Array<Snowflake>;
     pauseCommand?: string;
     ignoreBots?: boolean;
     testMode?: boolean;
+    forceRegister?: boolean;
     errMsg?: {
         tooFewArgs?: string;
         tooManyArgs?: string;
@@ -636,20 +650,21 @@ export type HandlerOpions = {
     };
 };
 export type HandlerConstructor = {
-    readonly client: Discord.Client;
+    readonly client: Client;
     prefix: string;
     commandsDir: string;
     verbose?: boolean;
-    admins?: Array<Discord.Snowflake>;
-    testServers?: Array<Discord.Snowflake>;
+    admins?: Array<Snowflake>;
+    testServers?: Array<Snowflake>;
     triggers?: Array<Array<string>>;
     helpCommand?: HelpSettings;
     logging?: LoggerOptions;
     mongodb?: string;
-    blacklist?: Array<Discord.Snowflake>;
+    blacklist?: Array<Snowflake>;
     pauseCommand?: string;
     ignoreBots?: boolean;
     testMode?: boolean;
+    forceRegister?: boolean;
 };
 export type HandlerEvents = {
     ready: () => void;
@@ -658,5 +673,3 @@ export type HandlerEvents = {
     dbSynced: () => void;
 };
 export interface HandlerError extends Error {}
-
-// FIXME: cooldowns
